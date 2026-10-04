@@ -698,6 +698,27 @@ gamedb_value() {
     grep -m1 "^$1=" "$GAMEDB_ENV" 2>/dev/null | cut -d= -f2-
 }
 
+# The port game servers and the panel reach the database server on (3306 unless that is taken).
+gamedb_port() {
+    local p
+    p="$(gamedb_value DB_PORT)"
+    echo "${p:-3306}"
+}
+
+# The first port from 3306 on that nothing listens on.
+free_db_port() {
+    local p
+    for p in 3306 $(seq 3307 3330); do
+        port_in_use "$p" || { echo "$p"; return 0; }
+    done
+    return 1
+}
+
+# Does the database server on port 3306 accept connections from outside this machine?
+db_listens_on_network() {
+    ss -ltnH 'sport = :3306' 2>/dev/null | awk '{print $4}' | grep -qvE '^(127\.|\[::1\])'
+}
+
 wait_for_gamedb() {
     local tries=0
     until docker exec "$GAMEDB_CONTAINER" healthcheck.sh --connect --innodb_initialized >/dev/null 2>&1; do
@@ -718,7 +739,7 @@ prepare_gamedb() {
 
 start_gamedb() {
     docker run -d --name "$GAMEDB_CONTAINER" --restart unless-stopped \
-        -p 3306:3306 -v recoded_gamedb:/var/lib/mysql --env-file "$GAMEDB_ENV" \
+        -p "$(gamedb_port):3306" -v recoded_gamedb:/var/lib/mysql --env-file "$GAMEDB_ENV" \
         mariadb:11 --bind-address=0.0.0.0
 }
 
@@ -731,10 +752,19 @@ setup_game_database() {
         return 0
     fi
 
+    local db_port=3306
     if port_in_use 3306; then
-        # A MySQL/MariaDB already runs here (e.g. the one of the old Pterodactyl panel): use it.
-        adopt_local_mysql
-        return $?
+        # A MySQL/MariaDB already runs here (e.g. the one of the old Pterodactyl panel). One that is
+        # reachable from the network is used as it is. One that only listens on 127.0.0.1 can't be
+        # reached by game servers (they would see 127.0.0.1 as themselves), so it is left alone and
+        # a new database server gets the next free port, reachable at the server's own address.
+        if db_listens_on_network; then
+            adopt_local_mysql
+            return $?
+        fi
+        db_port="$(free_db_port)" || { warn "No free port for a database server (3306-3330 are all in use)."; return 1; }
+        info "The database server already on this machine only listens on 127.0.0.1, so game servers couldn't reach it."
+        info "Setting up a separate one for game servers on port $db_port (the existing one stays untouched)."
     fi
 
     mkdir -p "$(dirname "$GAMEDB_ENV")"
@@ -742,6 +772,7 @@ setup_game_database() {
         umask 077
         cat > "$GAMEDB_ENV" <<EOF
 # Database server for game servers (container $GAMEDB_CONTAINER). Keep this file private.
+DB_PORT=$db_port
 MARIADB_ROOT_PASSWORD=$(random_string 32)
 MARIADB_USER=pterodactyluser
 MARIADB_PASSWORD=$(random_string 32)
@@ -753,7 +784,7 @@ EOF
     start_gamedb >/dev/null 2>&1 || { warn "Could not start the database server for game servers."; return 1; }
     run_step "Setting up the database server for game servers" "Database server for game servers is running" prepare_gamedb \
         || { warn "The database server did not become ready. See: docker logs $GAMEDB_CONTAINER"; return 1; }
-    open_firewall_ports 3306/tcp
+    open_firewall_ports "$db_port/tcp"
 }
 
 # The address of the game database server: the node's address, or 127.0.0.1 for a MySQL that only
@@ -761,39 +792,21 @@ EOF
 gamedb_host() {
     local host
     host="$(gamedb_value DB_HOST)"
-    echo "${host:-${NODE_FQDN:-$(public_ip)}}"
-}
-
-# 127.0.0.1 is forwarded into the panel container by the hostdb service (see hostdb-relay.sh).
-ensure_hostdb_target() {
-    local target="$1" current
-    current="$(env_value HOSTDB_TARGETS)"
-    case ",$current," in *",$target,"*) return 0 ;; esac
-    set_env_value HOSTDB_TARGETS "${current:+$current,}$target"
-    set_env_value COMPOSE_PROFILES hostdb
-    local port; port="$(env_value HTTP_PORT)"; port="${port:-80}"
-    run_step "Applying the settings" "Settings applied" dc up -d || return 1
-    run_step "Waiting for the panel" "Panel is running" wait_for_panel "$port"
+    [ -n "$host" ] || host="${NODE_FQDN:-}"
+    # Never a loopback address: users and their game servers must be able to reach it.
+    case "$host" in ""|localhost|127.*) host="$(public_ip)" ;; esac
+    echo "$host"
 }
 
 # Panel on this machine: add the database server in the panel directly.
 register_game_database_local() {
     local id host
     host="$(gamedb_host)"
-    [ "$host" = "127.0.0.1" ] && { ensure_hostdb_target 127.0.0.1:3306 || warn "Could not set up the forwarding to the database server."; }
-    id="$(dc exec -T panel php artisan p:database-host:quick-setup --host="$host" --port=3306 \
+    id="$(dc exec -T panel php artisan p:database-host:quick-setup --host="$host" --port="$(gamedb_port)" \
         --username="$(gamedb_value MARIADB_USER)" --password="$(gamedb_value MARIADB_PASSWORD)" \
         --node="${NODE_ID:-}" 2>&1 | tr -d '\r' | tail -n1)"
-    if ! [[ "$id" =~ ^[0-9]+$ ]] && [ "$host" != "127.0.0.1" ] && [ "$(gamedb_value ADOPTED)" = "1" ]; then
-        # The public address isn't reachable from the panel's container: use the forwarded local one.
-        if ensure_hostdb_target 127.0.0.1:3306; then
-            id="$(dc exec -T panel php artisan p:database-host:quick-setup --host=127.0.0.1 --port=3306 \
-                --username="$(gamedb_value MARIADB_USER)" --password="$(gamedb_value MARIADB_PASSWORD)" \
-                --node="${NODE_ID:-}" 2>&1 | tr -d '\r' | tail -n1)"
-        fi
-    fi
     if [[ "$id" =~ ^[0-9]+$ ]]; then
-        ok "Database host added to the panel: users can now create databases for their servers"
+        ok "Database host $host:$(gamedb_port) added to the panel: users can now create databases for their servers"
     else
         warn "The database server runs, but the panel could not add it: $id"
         print_game_database_details
@@ -850,7 +863,7 @@ find_host_sql_admin() {
 # (all rights with GRANT OPTION, as Pterodactyl's database hosts need), and the panel registers it
 # like the container variant. The existing databases and accounts are not touched.
 adopt_local_mysql() {
-    local listen loopback=1 user pass host sql h
+    local user pass sql h
     info "Port 3306 is used by a database server that already runs on this machine; using it for game servers."
     if ! find_host_sql_admin; then
         warn "No administrator access to that database server, so nothing was set up for game servers."
@@ -858,10 +871,6 @@ adopt_local_mysql() {
         echo "     Admin > Databases > Create New (or run this option again). Unattended: set MC_HSQL_USER and MC_HSQL_PASS."
         return 1
     fi
-
-    # Listening only on 127.0.0.1 (the usual default)? Then the panel reaches it through the forwarding.
-    listen="$(ss -ltnH 'sport = :3306' 2>/dev/null | awk '{print $4}')"
-    grep -qvE '^(127\.|\[::1\])' <<<"$listen" && loopback=0
 
     mkdir -p "$(dirname "$GAMEDB_ENV")"
     user="$(gamedb_value MARIADB_USER)"; pass="$(gamedb_value MARIADB_PASSWORD)"
@@ -874,7 +883,7 @@ adopt_local_mysql() {
 ADOPTED=1
 MARIADB_USER=$user
 MARIADB_PASSWORD=$pass
-DB_HOST=$([ "$loopback" = "1" ] && echo 127.0.0.1)
+DB_PORT=3306
 EOF
         )
     fi
@@ -900,7 +909,7 @@ EOF
         printf '%s\n' "$sql" | host_sql >/dev/null 2>&1 || true
     fi
     ok "Account '$user' for the panel created in the existing database server (its other databases and accounts are untouched)"
-    [ "$loopback" = "1" ] || echo "     It also listens on the network; open port 3306 in your firewall only if game servers on other machines need it."
+    echo "     Open port 3306 in your firewall only if game servers on other machines need it."
     return 0
 }
 
@@ -909,7 +918,7 @@ print_game_database_details() {
     printf '%s%s%s\n' "$C_BOLD" "Add the database server in the panel" "$C_RESET"
     echo "  Admin > Databases > Create New, and enter:"
     echo "    Host:         $(gamedb_host)"
-    echo "    Port:         3306"
+    echo "    Port:         $(gamedb_port)"
     echo "    Username:     $(gamedb_value MARIADB_USER)"
     echo "    Password:     $(gamedb_value MARIADB_PASSWORD)"
     echo "    Linked Node:  this node"

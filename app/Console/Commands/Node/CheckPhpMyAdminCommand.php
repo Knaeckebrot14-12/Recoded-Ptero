@@ -225,7 +225,10 @@ class CheckPhpMyAdminCommand extends Command
                 return 'the database refused phpMyAdmin: ' . trim($m[1]);
             }
 
-            return 'phpMyAdmin did not show its start page (HTTP ' . $response->status() . ')';
+            // What the page says instead, so the problem can be read from the installer's output.
+            $text = trim((string) preg_replace('/\s+/', ' ', strip_tags((string) preg_replace('#<(script|style)\b.*?</\1>#si', '', $body))));
+
+            return 'phpMyAdmin did not show its start page (HTTP ' . $response->status() . ($text !== '' ? ', page says: "' . Str::limit($text, 160) . '"' : '') . ')';
         } catch (\Throwable $exception) {
             return Str::limit($exception->getMessage(), 140);
         }
