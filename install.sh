@@ -1731,34 +1731,35 @@ EOF
 # by the web server, and a real sign-in through the ticket flow to every database host. Prints it as a
 # checklist; returns 1 when something failed. Extra arguments go to the command (for example --enable).
 check_phpmyadmin() {
-    local out status check detail addr text failed=0
+    local out status check detail addr text version="" base_ok=1 failed=0
     out="$(dc exec -T panel php artisan p:phpmyadmin:check "$@" 2>>"$INSTALL_LOG" | tr -d '\r')"
     if [ -z "$out" ]; then
         warn "The phpMyAdmin check gave no result. See: recoded-ptero logs panel"
         return 1
     fi
+    # Short on purpose: one line when phpMyAdmin itself is fine, one line per database host.
     while IFS='|' read -r status check detail; do
         case "$check" in
-            image) if [ "$status" = "ok" ]; then ok "$detail is installed"; else warn "$detail"; failed=1; fi ;;
-            enabled) if [ "$status" = "ok" ]; then ok "phpMyAdmin is switched $detail"; else warn "phpMyAdmin is $detail"; failed=1; fi ;;
-            web) if [ "$status" = "ok" ]; then ok "The web server serves phpMyAdmin ($detail)"; else warn "The web server does not serve phpMyAdmin correctly: $detail"; failed=1; fi ;;
+            image) version="$detail"; [ "$status" = "ok" ] || { warn "${detail:0:110}"; base_ok=0; failed=1; } ;;
+            enabled) [ "$status" = "ok" ] || { warn "phpMyAdmin is $detail"; base_ok=0; failed=1; } ;;
+            web) [ "$status" = "ok" ] || { warn "The web server does not serve phpMyAdmin correctly: ${detail:0:110}"; base_ok=0; failed=1; } ;;
+        esac
+    done <<<"$out"
+    [ "$base_ok" = "1" ] && ok "$version is installed, switched on and reachable"
+    while IFS='|' read -r status check detail; do
+        case "$check" in
             hosts) info "$detail" ;;
             host)
                 addr="${detail%%|*}"; text="${detail#*|}"
                 if [ "$status" = "ok" ]; then
-                    ok "Database host $addr: $text"
+                    ok "Database host ${addr#*:} works"
                 else
-                    warn "Database host $addr: $text"; failed=1
+                    warn "Database host ${addr#*:} fails: ${text:0:110}"; failed=1
                 fi
                 ;;
         esac
     done <<<"$out"
-    if [ "$failed" = "1" ]; then
-        echo "     A database host that fails here: check its address, user and password under Admin > Databases."
-        echo "     The panel runs in Docker and connects from the address range 172.16.0.0/12; MySQL must allow its"
-        echo "     user from there (or '%'). Hosts at 127.0.0.1 / localhost are forwarded automatically."
-        echo "     Test again any time with: recoded-ptero artisan p:phpmyadmin:check"
-    fi
+    [ "$failed" = "1" ] && echo "     More detail: recoded-ptero artisan p:phpmyadmin:check"
 
     return "$failed"
 }
