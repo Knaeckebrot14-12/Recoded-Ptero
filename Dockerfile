@@ -71,6 +71,9 @@ COPY . ./
 COPY --from=0 /app/public/assets ./public/assets
 # phpMyAdmin stays owned by root (read-only for php-fpm), so it is left out of the chown below.
 COPY .github/docker/phpmyadmin/config.inc.php .github/docker/phpmyadmin/signon.php ./public/phpmyadmin/
+# phpMyAdmin refuses to start when its config file is world writable, which is what a build on
+# Windows (or with a strange umask) would produce. Nothing in there is writable for others.
+RUN chmod 644 public/phpmyadmin/config.inc.php public/phpmyadmin/signon.php && chmod -R go-w public/phpmyadmin
 # A throwaway key lets composer's artisan hooks run cleanly during the build; the .env with it is
 # deleted right after, and the real key is created on first start (see entrypoint.sh).
 RUN cp .env.example .env \

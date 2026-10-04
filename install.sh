@@ -1075,6 +1075,7 @@ install_wings() {
     if [ "$with_db" = "1" ] && setup_game_database; then
         if [ "$panel_here" = "1" ]; then
             register_game_database_local
+            check_phpmyadmin --enable || warn "phpMyAdmin needs attention; run the installer again and choose [9] after fixing it."
         else
             print_game_database_details
         fi
@@ -1249,25 +1250,6 @@ prepare_hostdb_relay() {
     return 0
 }
 
-# Logs in to every database host the way the panel does and says which ones don't work.
-check_database_hosts() {
-    local out status id addr name err failed=0
-    out="$(dc exec -T panel php artisan p:database-hosts:check 2>/dev/null | tr -d '\r')"
-    [ -n "$out" ] || return 0
-    while IFS='|' read -r status id addr name err; do
-        case "$status" in
-            ok) ok "Database host '$name' ($addr): the panel can create databases" ;;
-            fail) warn "Database host '$name' ($addr): the panel cannot log in: $err"; failed=1 ;;
-        esac
-    done <<<"$out"
-    if [ "$failed" = "1" ]; then
-        echo "     The panel now runs in Docker and connects from the address range 172.16.0.0/12."
-        echo "     Allow its database user from there (or '%') in that MySQL server, or enter"
-        echo "     127.0.0.1 as the host under Admin > Databases if MySQL runs on this machine,"
-        echo "     then run: recoded-ptero artisan p:database-hosts:check"
-    fi
-}
-
 # Wings on this machine (the usual single-server setup): which node it is. Sets LOCAL_NODE_ID,
 # LOCAL_NODE_FQDN_VALUE, LOCAL_NODE_SCHEME and LOCAL_NODE_PORT; returns 1 when there is none.
 detect_local_node() {
@@ -1320,7 +1302,6 @@ upgrade_finish() {
     [ "${AUTO_UPDATE:-0}" = "1" ] && dc exec -T panel php artisan p:update:auto on >/dev/null 2>&1 && ok "Automatic updates enabled"
 
     [ "$local_node" = "1" ] && upgrade_local_wings
-    check_database_hosts
 
     # Like a new installation with Wings: a database server for game servers, if there is none yet.
     if [ "$local_node" = "1" ] && [ "$(new_sql 'SELECT COUNT(*) FROM database_hosts')" = "0" ]; then
@@ -1330,6 +1311,11 @@ upgrade_finish() {
             NODE_FQDN="$LOCAL_NODE_FQDN_VALUE" NODE_ID="$LOCAL_NODE_ID" register_game_database_local
         fi
     fi
+
+    # phpMyAdmin is part of the new panel; check it end to end, including a sign-in to every database host.
+    echo
+    info "Checking phpMyAdmin and the database hosts..."
+    check_phpmyadmin --enable || warn "phpMyAdmin or a database host needs attention; run the installer again and choose [9] after fixing it."
 
     # Nodes on other machines need the new Wings too; the panel can't install it on stock Wings.
     while IFS=$'\t' read -r id name fqdn; do
@@ -1596,6 +1582,321 @@ EOF
     echo
 }
 
+# ---------------------------------------------------------------- phpMyAdmin and databases
+#
+# Runs the panel's own check (p:phpmyadmin:check): phpMyAdmin installed in the image, switched on, served
+# by the web server, and a real sign-in through the ticket flow to every database host. Prints it as a
+# checklist; returns 1 when something failed. Extra arguments go to the command (for example --enable).
+check_phpmyadmin() {
+    local out status check detail addr text failed=0
+    out="$(dc exec -T panel php artisan p:phpmyadmin:check "$@" 2>>"$INSTALL_LOG" | tr -d '\r')"
+    if [ -z "$out" ]; then
+        warn "The phpMyAdmin check gave no result. See: recoded-ptero logs panel"
+        return 1
+    fi
+    while IFS='|' read -r status check detail; do
+        case "$check" in
+            image) if [ "$status" = "ok" ]; then ok "$detail is installed"; else warn "$detail"; failed=1; fi ;;
+            enabled) if [ "$status" = "ok" ]; then ok "phpMyAdmin is switched $detail"; else warn "phpMyAdmin is $detail"; failed=1; fi ;;
+            web) if [ "$status" = "ok" ]; then ok "The web server serves phpMyAdmin ($detail)"; else warn "The web server does not serve phpMyAdmin correctly: $detail"; failed=1; fi ;;
+            hosts) info "$detail" ;;
+            host)
+                addr="${detail%%|*}"; text="${detail#*|}"
+                if [ "$status" = "ok" ]; then
+                    ok "Database host $addr: $text"
+                else
+                    warn "Database host $addr: $text"; failed=1
+                fi
+                ;;
+        esac
+    done <<<"$out"
+    if [ "$failed" = "1" ]; then
+        echo "     A database host that fails here: check its address, user and password under Admin > Databases."
+        echo "     The panel runs in Docker and connects from the address range 172.16.0.0/12; MySQL must allow its"
+        echo "     user from there (or '%'). Hosts at 127.0.0.1 / localhost are forwarded automatically."
+        echo "     Test again any time with: recoded-ptero artisan p:phpmyadmin:check"
+    fi
+
+    return "$failed"
+}
+
+# Sets up everything around the databases of game servers and checks it: phpMyAdmin is part of the
+# installed panel (the panel is updated when it is not), a database server for game servers exists
+# and is registered in the panel, hosts on this machine are reachable, and phpMyAdmin really signs in.
+setup_databases() {
+    [ -f "$INSTALL_DIR/.env" ] || die "Recoded Ptero is not installed in $INSTALL_DIR. Install it first (option [1] or [4])."
+    local port hosts
+    port="$(env_value HTTP_PORT)"; port="${port:-80}"
+
+    dc up -d >/dev/null 2>&1 || die "Could not start the panel. Check: recoded-ptero logs panel"
+    run_step "Waiting for the panel" "Panel is running" wait_for_panel "$port" \
+        || die "The panel did not come up in time. Check: recoded-ptero logs panel"
+
+    # 1. phpMyAdmin comes with the panel image (older versions don't have it).
+    if dc exec -T panel test -f /app/public/phpmyadmin/signon.php; then
+        ok "phpMyAdmin is part of the installed panel"
+    else
+        warn "The installed panel version does not include phpMyAdmin yet."
+        run_step "Updating the panel (phpMyAdmin comes with the newest version)" "Panel updated" \
+            bash "$INSTALL_DIR/installer/updater/updater.sh" run "databases-$(date +%s)" false 0 \
+            || die "The update failed. Try: recoded-ptero update"
+        run_step "Waiting for the panel" "Panel is running" wait_for_panel "$port" \
+            || die "The panel did not come up in time. Check: recoded-ptero logs panel"
+        dc exec -T panel test -f /app/public/phpmyadmin/signon.php || die "phpMyAdmin is still missing after the update."
+        ok "phpMyAdmin is installed"
+    fi
+
+    # 2. A database server for game servers, registered in the panel.
+    hosts="$(new_sql 'SELECT COUNT(*) FROM database_hosts')"
+    if [ "${hosts:-0}" = "0" ]; then
+        info "No database host is set up in the panel yet."
+        if detect_local_node; then
+            if confirm "Set up a MySQL database server for game servers on this machine and add it to the panel?" y \
+                && setup_game_database; then
+                NODE_FQDN="$LOCAL_NODE_FQDN_VALUE" NODE_ID="$LOCAL_NODE_ID" register_game_database_local
+            fi
+        else
+            warn "There is no Wings node on this machine, so the database server can't be created here."
+            echo "     Run this on the machine that runs Wings (Wings option [3] offers it there), or add a database"
+            echo "     host yourself under Admin > Databases > Create New."
+        fi
+    else
+        ok "$hosts database host(s) registered in the panel"
+    fi
+
+    # 3. Hosts on this machine (127.0.0.1 / localhost) need the forwarding into the container.
+    if prepare_hostdb_relay; then
+        run_step "Applying the settings" "Settings applied" dc up -d || warn "Could not restart the services: recoded-ptero restart"
+        run_step "Waiting for the panel" "Panel is running" wait_for_panel "$port" || warn "The panel takes long to start. Check: recoded-ptero logs panel"
+    fi
+
+    # 4. Does it all work, including a real sign-in to phpMyAdmin?
+    echo
+    info "Checking phpMyAdmin and every database host..."
+    if check_phpmyadmin --enable; then
+        ok "phpMyAdmin works: open it under Admin > Databases, or from a server's Databases tab."
+    else
+        warn "Something needs attention (see above). Run this option again after fixing it."
+        return 1
+    fi
+}
+
+# ---------------------------------------------------------------- go back to Pterodactyl
+#
+# An upgrade leaves the old Pterodactyl panel (files and database) untouched and saves what is needed
+# to switch back (rollback.sh, nginx site, crontab) in its backup folder. This is the guided version:
+# it can carry over what happened in Recoded Ptero since the upgrade, puts the old panel back (nginx,
+# queue worker, cron job) and stops Recoded Ptero. Nothing is deleted; Recoded Ptero's containers and
+# data stay until you uninstall it. Every step that could fail restores the previous state.
+
+REV_BACKUP=""
+REV_MAINT=0
+
+revert_fail() {
+    printf '%s ✘ %s%s\n' "$C_RED" "$*" "$C_RESET" >&2
+    [ "$REV_MAINT" = "1" ] && dc exec -T panel php artisan up >/dev/null 2>&1
+    dc up -d updater >/dev/null 2>&1
+    [ -n "$REV_BACKUP" ] && echo " Backups made before the revert: $REV_BACKUP" >&2
+    echo " Recoded Ptero keeps running as before; nothing was switched." >&2
+    exit 1
+}
+
+# The upgrade backup to go back to: the newest one that has everything needed.
+revert_find_backup() {
+    local dir
+    for dir in $(ls -dt "$INSTALL_DIR"/backups/pterodactyl-*/ 2>/dev/null); do
+        dir="${dir%/}"
+        if [ -f "$dir/rollback.sh" ] && [ -f "$dir/old.env" ] && [ -f "$dir/nginx-site.conf" ] && [ -f "$dir/crontab.txt" ]; then
+            UPG_BACKUP="$dir"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+# artisan of the old panel as the user who owns its files (root would leave root-owned cache files behind).
+old_artisan_owner() {
+    local owner
+    owner="$(stat -c %U "$OLD_DIR" 2>/dev/null)"
+    if [ -n "$owner" ] && [ "$owner" != "root" ] && command -v runuser >/dev/null 2>&1; then
+        (cd "$OLD_DIR" && runuser -u "$owner" -- php artisan "$@")
+    else
+        (cd "$OLD_DIR" && php artisan "$@")
+    fi
+}
+
+# MariaDB dumps carry MariaDB-only collations that MySQL 8 doesn't know.
+revert_convert_dump() {
+    sed -e 's/utf8mb4_uca1400_[A-Za-z0-9_]*/utf8mb4_unicode_ci/g' -e 's/utf8mb3_uca1400_[A-Za-z0-9_]*/utf8_unicode_ci/g'
+}
+
+revert_restore_old_db() {
+    [ -s "$REV_BACKUP/pterodactyl-database.sql.gz" ] || return 0
+    warn "Restoring the Pterodactyl database as it was..."
+    gzip -dc "$REV_BACKUP/pterodactyl-database.sql.gz" | old_mysql "$OLD_DB_NAME" \
+        || warn "Could not restore it automatically; the dump is $REV_BACKUP/pterodactyl-database.sql.gz"
+}
+
+revert_panel() {
+    [ -f "$INSTALL_DIR/.env" ] || die "Recoded Ptero is not installed in $INSTALL_DIR."
+    revert_find_backup || die "There is no earlier Pterodactyl panel to go back to: this panel was installed fresh, or the upgrade backup in $INSTALL_DIR/backups is gone. To run the official Pterodactyl instead, install it following https://pterodactyl.io/panel/1.0/getting_started.html and restore a database dump into it."
+
+    OLD_DIR="$(sed -n 's/^cd "\(.*\)" && php artisan up$/\1/p' "$UPG_BACKUP/rollback.sh" | head -n1)"
+    NGINX_SITE="$(sed -n 's/^cp -f "[^"]*" "\([^"]*\)" && nginx -t.*/\1/p' "$UPG_BACKUP/rollback.sh" | head -n1)"
+    UPG_PTEROQ_WAS_ACTIVE=0
+    grep -q '^\[ "1" = "1" \] && systemctl start pteroq' "$UPG_BACKUP/rollback.sh" && UPG_PTEROQ_WAS_ACTIVE=1
+    { [ -n "$OLD_DIR" ] && [ -f "$OLD_DIR/artisan" ] && [ -f "$OLD_DIR/.env" ]; } || die "The old Pterodactyl panel was not found in '${OLD_DIR:-?}' (artisan or .env is missing); it can't be switched back."
+    [ -n "$NGINX_SITE" ] || die "The nginx site of the old panel could not be read from $UPG_BACKUP/rollback.sh."
+    command -v php >/dev/null 2>&1 || die "php was not found, which the old panel needs."
+    command -v nginx >/dev/null 2>&1 || die "nginx was not found, which served the old panel."
+
+    OLD_DB_HOST="$(old_env DB_HOST)"; OLD_DB_HOST="${OLD_DB_HOST:-127.0.0.1}"
+    OLD_DB_PORT="$(old_env DB_PORT)"; OLD_DB_PORT="${OLD_DB_PORT:-3306}"
+    OLD_DB_NAME="$(old_env DB_DATABASE)"; OLD_DB_NAME="${OLD_DB_NAME:-panel}"
+    OLD_DB_USER="$(old_env DB_USERNAME)"
+    OLD_DB_PASS="$(old_env DB_PASSWORD)"
+    OLD_APP_URL="$(old_env APP_URL)"; OLD_APP_URL="${OLD_APP_URL%/}"
+    if command -v mariadb >/dev/null 2>&1; then MYSQL_BIN=mariadb; DUMP_BIN=mariadb-dump
+    elif command -v mysql >/dev/null 2>&1; then MYSQL_BIN=mysql; DUMP_BIN=mysqldump
+    else die "No MySQL/MariaDB client found on this server."
+    fi
+    command -v "$DUMP_BIN" >/dev/null 2>&1 || DUMP_BIN=mysqldump
+    command -v "$DUMP_BIN" >/dev/null 2>&1 || die "No mysqldump/mariadb-dump found on this server."
+    old_mysql -N -e "SELECT 1 FROM users LIMIT 1" "$OLD_DB_NAME" >/dev/null 2>&1 \
+        || die "Could not read the Pterodactyl database ($OLD_DB_NAME) with the credentials from $OLD_DIR/.env."
+    dc ps >/dev/null 2>&1 || die "Docker is not running."
+    dc up -d >/dev/null 2>&1 || die "Could not start Recoded Ptero to read its data."
+
+    # What can be carried over: only if the old panel's code is not older than the database changes it needs.
+    local ahead mode="${MC_REVERT_MODE:-}" carry_ok=1
+    ahead="$(comm -13 <(old_mysql -N -e "SELECT migration FROM migrations" "$OLD_DB_NAME" | sort) <(new_sql "SELECT migration FROM migrations" | sort) | grep -v '^2026_' | head -n3 | tr '\n' ' ')"
+    if [ -n "$ahead" ] && [ "${MC_REVERT_FORCE:-0}" != "1" ]; then
+        carry_ok=0
+    fi
+
+    echo
+    printf '%s%s%s\n' "$C_BOLD" "Go back to the normal Pterodactyl panel" "$C_RESET"
+    echo " Found your Pterodactyl panel in $OLD_DIR (nginx: $NGINX_SITE)."
+    echo " Backup of the upgrade: $UPG_BACKUP"
+    echo
+    echo " What happens:"
+    echo "   1. Recoded Ptero goes into maintenance mode (a few minutes; game servers keep running)."
+    echo "   2. Backups: Recoded Ptero's database and the Pterodactyl database."
+    echo "   3. Optionally the data of Recoded Ptero is copied into the Pterodactyl database."
+    echo "   4. nginx, the queue worker and the cron job of Pterodactyl are switched back on."
+    echo "   5. Recoded Ptero is stopped (its containers and data are kept, nothing is deleted)."
+    echo " The panel keeps its address, logins and Wings connections. Recoded Ptero's extra features"
+    echo " (version changer, subdomains, tickets, coins, ...) are gone in Pterodactyl; their data stays in the database."
+    echo
+    if [ "$carry_ok" = "0" ]; then
+        warn "Recoded Ptero's database has newer Pterodactyl changes than your old panel knows: $ahead"
+        warn "Carrying the data over could break the old panel, so only the exact old state is offered."
+        mode=2
+    fi
+    if [ -z "$mode" ]; then
+        echo " [1] Carry over everything done in Recoded Ptero since the upgrade (new users, servers, settings, ...)"
+        echo " [2] Go back to the exact state at the time of the upgrade (changes since then stay only in the backup)"
+        ask mode "Choose 1 or 2" "1"
+    fi
+    case "$mode" in 1|carry) mode=carry ;; 2|exact) mode=exact ;; *) die "Please choose 1 or 2." ;; esac
+    if [ "${MC_REVERT_CONFIRM:-}" != "yes" ]; then
+        confirm "Go back to Pterodactyl now?" n || die "Aborted, nothing was changed."
+    fi
+
+    REV_BACKUP="$INSTALL_DIR/backups/before-revert-$(date -u +%Y%m%d-%H%M%S)"
+    mkdir -p "$REV_BACKUP"; chmod 700 "$REV_BACKUP"
+
+    # ------------------------------------------------------------ nothing is switched before this point works
+    dc stop updater >/dev/null 2>&1
+    info "Putting Recoded Ptero into maintenance mode..."
+    dc exec -T panel php artisan down >/dev/null 2>&1 || revert_fail "Could not put Recoded Ptero into maintenance mode."
+    REV_MAINT=1
+
+    info "Backing up both databases..."
+    dc exec -T database sh -c 'mariadb-dump -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction --quick --no-tablespaces --default-character-set=utf8mb4 panel' \
+        2>"$REV_BACKUP/dump.err" | gzip > "$REV_BACKUP/recoded-ptero-database.sql.gz"
+    [ "${PIPESTATUS[0]}" -eq 0 ] || revert_fail "The dump of Recoded Ptero's database failed: $(head -c 300 "$REV_BACKUP/dump.err")"
+    gzip -dc "$REV_BACKUP/recoded-ptero-database.sql.gz" | grep -q 'CREATE TABLE `users`' || revert_fail "The dump of Recoded Ptero's database looks incomplete."
+    MYSQL_PWD="$OLD_DB_PASS" "$DUMP_BIN" -h "$OLD_DB_HOST" -P "$OLD_DB_PORT" -u "$OLD_DB_USER" \
+        --single-transaction --quick --no-tablespaces --default-character-set=utf8mb4 "$OLD_DB_NAME" 2>"$REV_BACKUP/dump-old.err" | gzip > "$REV_BACKUP/pterodactyl-database.sql.gz"
+    [ "${PIPESTATUS[0]}" -eq 0 ] || revert_fail "The dump of the Pterodactyl database failed: $(head -c 300 "$REV_BACKUP/dump-old.err")"
+    gzip -dc "$REV_BACKUP/pterodactyl-database.sql.gz" | grep -q 'CREATE TABLE `users`' || revert_fail "The dump of the Pterodactyl database looks incomplete."
+    cp -p "$NGINX_SITE" "$REV_BACKUP/nginx-site-recoded.conf"
+    crontab -l > "$REV_BACKUP/crontab-before.txt" 2>/dev/null || : > "$REV_BACKUP/crontab-before.txt"
+    ok "Backups saved in $REV_BACKUP"
+
+    local users servers nodes
+    if [ "$mode" = "carry" ]; then
+        users="$(new_sql 'SELECT COUNT(*) FROM users')"; servers="$(new_sql 'SELECT COUNT(*) FROM servers')"; nodes="$(new_sql 'SELECT COUNT(*) FROM nodes')"
+        info "Copying the data of Recoded Ptero into the Pterodactyl database..."
+        if ! gzip -dc "$REV_BACKUP/recoded-ptero-database.sql.gz" | revert_convert_dump | old_mysql "$OLD_DB_NAME"; then
+            revert_restore_old_db
+            revert_fail "Importing the data failed (details in $INSTALL_LOG)."
+        fi
+        if [ "$(old_mysql -N -e 'SELECT COUNT(*) FROM users' "$OLD_DB_NAME")" != "$users" ] \
+            || [ "$(old_mysql -N -e 'SELECT COUNT(*) FROM servers' "$OLD_DB_NAME")" != "$servers" ] \
+            || [ "$(old_mysql -N -e 'SELECT COUNT(*) FROM nodes' "$OLD_DB_NAME")" != "$nodes" ]; then
+            revert_restore_old_db
+            revert_fail "The copied data does not match (users/servers/nodes counts differ)."
+        fi
+        if ! old_artisan_owner migrate --force >>"$INSTALL_LOG" 2>&1; then
+            revert_restore_old_db
+            revert_fail "The Pterodactyl panel could not use the copied database (php artisan migrate failed, see $INSTALL_LOG)."
+        fi
+        ok "Copied: $users users, $servers servers, $nodes nodes, all counts match"
+    fi
+    old_artisan_owner config:clear >/dev/null 2>&1; old_artisan_owner cache:clear >/dev/null 2>&1; old_artisan_owner view:clear >/dev/null 2>&1
+
+    # ------------------------------------------------------------ switching
+    info "Switching nginx, the queue worker and the cron job back to Pterodactyl..."
+    cp -f "$UPG_BACKUP/nginx-site.conf" "$NGINX_SITE"
+    if ! nginx -t >"$REV_BACKUP/nginx-test.txt" 2>&1; then
+        cp -f "$REV_BACKUP/nginx-site-recoded.conf" "$NGINX_SITE"
+        [ "$mode" = "carry" ] && revert_restore_old_db
+        revert_fail "The nginx config of the old panel is invalid: $(tail -n 3 "$REV_BACKUP/nginx-test.txt")"
+    fi
+    { systemctl reload nginx 2>/dev/null || nginx -s reload 2>/dev/null; } || { cp -f "$REV_BACKUP/nginx-site-recoded.conf" "$NGINX_SITE"; revert_fail "nginx could not be reloaded."; }
+    crontab "$UPG_BACKUP/crontab.txt" 2>/dev/null
+    [ "$UPG_PTEROQ_WAS_ACTIVE" = "1" ] && systemctl start pteroq >/dev/null 2>&1
+    old_artisan_owner up >/dev/null 2>&1
+    sleep 2
+
+    local host scheme_port=80 code
+    host="${OLD_APP_URL#*://}"; host="${host%%/*}"; host="${host%%:*}"
+    [[ "$OLD_APP_URL" == https://* ]] && scheme_port=443
+    code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 15 --resolve "$host:$scheme_port:127.0.0.1" "$OLD_APP_URL/auth/login" 2>/dev/null || true)"
+    if ! { [ -n "$code" ] && [ "$code" != "000" ] && [ "$code" -lt 500 ]; }; then
+        # Undo: Recoded Ptero's nginx site and cron state back, old panel off again.
+        old_artisan_owner down >/dev/null 2>&1
+        [ "$UPG_PTEROQ_WAS_ACTIVE" = "1" ] && systemctl stop pteroq >/dev/null 2>&1
+        crontab "$REV_BACKUP/crontab-before.txt" 2>/dev/null
+        cp -f "$REV_BACKUP/nginx-site-recoded.conf" "$NGINX_SITE"; { systemctl reload nginx 2>/dev/null || nginx -s reload 2>/dev/null; }
+        [ "$mode" = "carry" ] && revert_restore_old_db
+        revert_fail "$OLD_APP_URL does not answer with the Pterodactyl panel (HTTP $code); switched back to Recoded Ptero."
+    fi
+    ok "nginx serves your Pterodactyl panel at $OLD_APP_URL again"
+
+    dc stop >/dev/null 2>&1
+    REV_MAINT=0
+    echo
+    printf '%s%s%s\n' "$C_GREEN" "======================================================" "$C_RESET"
+    printf '%s%s%s\n' "$C_GREEN$C_BOLD" " Back on the normal Pterodactyl panel" "$C_RESET"
+    printf '%s%s%s\n' "$C_GREEN" "======================================================" "$C_RESET"
+    echo " URL:        $OLD_APP_URL (unchanged, same logins)"
+    if [ "$mode" = "carry" ]; then
+        echo " Data:       everything done in Recoded Ptero since the upgrade was carried over ($users users, $servers servers, $nodes nodes)."
+    else
+        echo " Data:       the exact state of the upgrade. What changed in Recoded Ptero since is in the backup only."
+    fi
+    echo " Backups:    $REV_BACKUP and $UPG_BACKUP"
+    echo " Recoded:    stopped, not deleted. Start it again: docker compose -f $COMPOSE_FILE up -d (it takes over nginx only after an upgrade)."
+    echo "             To remove it completely run this installer and choose \"Uninstall Recoded Ptero\" (that deletes $INSTALL_DIR"
+    echo "             including these backups; copy them elsewhere first)."
+    echo " Wings:      your nodes keep working. They run Recoded Ptero's Wings build, which also works with Pterodactyl."
+    echo
+}
+
 # ---------------------------------------------------------------- main
 
 main() {
@@ -1616,6 +1917,8 @@ main() {
         echo "  [5] Update Recoded Ptero to the newest version"
         echo "  [6] Uninstall Recoded Ptero"
         echo "  [7] Uninstall Wings"
+        echo "  [8] Go back to the normal Pterodactyl panel (after an upgrade from it)"
+        echo "  [9] Set up and check databases and phpMyAdmin (installs/registers what is missing)"
         echo "  [0] Quit"
         ask CHOICE "Choose" ""
         case "$CHOICE" in
@@ -1626,6 +1929,8 @@ main() {
             5) action="update" ;;
             6) action="uninstall-panel" ;;
             7) action="uninstall-wings" ;;
+            8) action="revert" ;;
+            9) action="databases" ;;
             *) exit 0 ;;
         esac
     fi
@@ -1641,6 +1946,8 @@ main() {
         update) update_panel ;;
         uninstall-panel) uninstall_panel ;;
         uninstall-wings) uninstall_wings ;;
+        revert) revert_panel ;;
+        databases) setup_databases ;;
         *) die "Unknown action: $action" ;;
     esac
 

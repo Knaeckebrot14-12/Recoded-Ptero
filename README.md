@@ -31,7 +31,7 @@ The installer sets up Docker, downloads this repository to `/opt/recoded-ptero`,
 
 What the installer asks:
 
-1. **What to do**: install Recoded Ptero, upgrade an existing Pterodactyl panel, install Wings, both, update, or uninstall. Nothing is installed before you pick an option.
+1. **What to do**: install Recoded Ptero, upgrade an existing Pterodactyl panel, install Wings, both, update, uninstall, go back to the normal Pterodactyl panel, or set up and check the databases and phpMyAdmin. Nothing is installed before you pick an option.
 2. **How the panel is reached**:
    - `1` HTTP by IP or domain (quick test setups),
    - `2` HTTPS with Let's Encrypt: enter the domain (its DNS A record must already point at the server) and an e-mail for certificate notices,
@@ -83,6 +83,26 @@ Afterwards the upgraded panel is set up like a new installation, so no feature i
 - **Nodes on other servers** are listed at the end: run the installer there, choose the Wings option and keep the existing connection. That only swaps in the new Wings.
 
 Requirements: 2 CPU cores and 4 GB RAM are recommended (the first build needs the memory; the installer offers to add swap on smaller servers). Ports 80 and 443 for the panel.
+
+### Going back to the normal Pterodactyl panel
+
+Run the installer on the same server and choose **Go back to the normal Pterodactyl panel** (it needs the upgrade backup from above). It asks which state to restore:
+
+- **Carry over what happened since the upgrade** (default): the data of Recoded Ptero (new users, servers, tickets, settings) is copied into the old panel's database; MariaDB collations are converted to the ones MySQL knows. Only offered when the old panel's code knows all database changes Recoded Ptero has made to Pterodactyl's own tables.
+- **Exactly the state of the upgrade**: the old database stays as it was; what was done in Recoded Ptero since then stays only in the backup.
+
+Before anything is switched, both databases and the nginx site are saved to `/opt/recoded-ptero/backups/before-revert-<date>/`. Then the old nginx site, cron entry and queue worker come back and the old panel starts again. If its migrations fail or it does not answer, everything is undone and Recoded Ptero keeps running. Recoded Ptero is only stopped, never deleted. Unattended: `MC_NONINTERACTIVE=1 MC_ACTION=revert MC_REVERT_MODE=carry|exact MC_REVERT_CONFIRM=yes`.
+
+### Databases and phpMyAdmin in one step
+
+**Set up and check databases and phpMyAdmin** can be run at any time and makes sure everything for databases works:
+
+1. Is phpMyAdmin part of the installed panel? If not (an older image), the panel is updated to the current version, which includes it.
+2. Is there a database host? If not and Wings runs on this machine, a database server for game servers is created and registered in the panel (it asks first).
+3. Database hosts at `127.0.0.1` or `localhost` get their forwarding into the container.
+4. phpMyAdmin is switched on and tested for real: web server routes, the connection of the panel and of phpMyAdmin to every database host, and a complete sign-in through the ticket flow. Every host is reported as working, or with the reason it does not.
+
+The same check can be run by hand with `docker compose exec panel php artisan p:phpmyadmin:check` in `/opt/recoded-ptero` (`--enable` switches phpMyAdmin on, `--no-login` skips the sign-in test). Install, upgrade and the Wings option run it automatically at the end.
 
 Unattended installs work with environment variables, for example:
 
