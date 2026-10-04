@@ -199,6 +199,11 @@ class CheckPhpMyAdminCommand extends Command
             $path = '/phpmyadmin/signon.php?ticket=' . $ticket;
             for ($hop = 0; $hop < 6; ++$hop) {
                 $response = $this->client($base, $hostHeader, $jar)->get($path);
+                // With an https panel address phpMyAdmin marks its cookies Secure, but this call goes to the
+                // container over plain http, which would drop them; the browser has https the whole way.
+                foreach ($jar as $cookie) {
+                    $cookie->setSecure(false);
+                }
                 $location = (string) $response->header('Location');
                 if ($response->status() < 300 || $response->status() >= 400 || $location === '') {
                     break;
