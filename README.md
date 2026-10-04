@@ -91,6 +91,18 @@ MC_NONINTERACTIVE=1 MC_ACTION=panel MC_MODE=1 MC_HOST=203.0.113.10 MC_ADMIN_EMAI
   bash <(curl -sSL https://raw.githubusercontent.com/Knaeckebrot14-12/Recoded-Ptero/main/install.sh)
 ```
 
+## Login lockout
+
+Too many failed logins (10 within 15 minutes by default; passwords, 2FA codes and passkeys count) block the person who made them from the sign-in pages (login, 2FA, registration, password reset) for 30 minutes, then 2 hours, then 24 hours. Admin → Settings → IP lockout changes the limits; Admin → Blocked IPs lists and lifts blocks. People who are already logged in are never affected.
+
+Only the culprit is blocked, never a shared address:
+
+- **The visitor's own address**, and **their browser**: sign-in pages set a random security cookie (`mcpanel_device`, nothing but a random number), so a browser stays recognisable when its IP address changes. The cookie is stored only as a hash.
+- **Cloudflare**: addresses of Cloudflare servers are never blocked. Behind Cloudflare's proxy the visitor's own address is read from the `CF-Connecting-IP` header (and only when the request really comes from a Cloudflare address, so the header can't be faked); no extra setup is needed. Without that header only the browser is blocked.
+- **Other reverse proxies**: set `TRUSTED_PROXIES` in `/opt/recoded-ptero/.env` to your proxy's address so visitors are told apart. Private addresses are never blocked; the browser cookie still works.
+- IPv6 clients are blocked as their whole /64, since they can switch addresses inside it freely.
+- The allowlist (IPs and ranges, same settings page) is never blocked. If the team locks itself out: `recoded-ptero artisan p:security:unblock-ip <IP or d:id from the Blocked IPs page>`.
+
 ## Updates
 
 The panel checks GitHub for new versions every five minutes. As owner, open **Admin → Settings → Updates**:

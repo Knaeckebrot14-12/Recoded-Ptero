@@ -58,9 +58,9 @@ abstract class AbstractLoginController extends Controller
         $this->incrementLoginAttempts($request);
         // Only text is used as "what was typed"; arrays and the like are not valid input anyway.
         $typed = is_string($request->input('user')) || is_int($request->input('user')) ? (string) $request->input('user') : null;
-        // Counts towards the automatic IP lockout (Admin -> Blocked IPs).
-        app(\Pterodactyl\Services\Security\IpLockoutService::class)->recordFailure(
-            $request->ip(),
+        // Counts towards the automatic lockout of the visitor's address and browser (Admin -> Blocked IPs).
+        app(\Pterodactyl\Services\Security\IpLockoutService::class)->recordFailureForRequest(
+            $request,
             $user?->username ?? $typed,
             $request->route()->named('auth.login-checkpoint') ? 'checkpoint' : 'login'
         );
@@ -84,7 +84,7 @@ abstract class AbstractLoginController extends Controller
         $request->session()->regenerate();
 
         $this->clearLoginAttempts($request);
-        app(\Pterodactyl\Services\Security\IpLockoutService::class)->recordSuccess($request->ip(), [$user->username, $user->email]);
+        app(\Pterodactyl\Services\Security\IpLockoutService::class)->recordSuccessForRequest($request, [$user->username, $user->email]);
 
         $this->auth->guard()->login($user, true);
 

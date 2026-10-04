@@ -21,7 +21,7 @@ class LoginFailure extends Model
 
     protected $table = 'login_failures';
 
-    protected $fillable = ['ip', 'username', 'type'];
+    protected $fillable = ['ip', 'device', 'username', 'type'];
 
     protected $casts = ['created_at' => 'datetime'];
 

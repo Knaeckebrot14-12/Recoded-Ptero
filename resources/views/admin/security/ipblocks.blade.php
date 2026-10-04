@@ -47,7 +47,7 @@
                         </tr>
                         @forelse($active as $block)
                             <tr>
-                                <td><code>{{ $block->ip }}{{ str_contains($block->ip, ":") ? "/64" : "" }}</code></td>
+                                <td>@if($block->isDevice())<span class="label label-info" title="{{ $block->ip }}"><i class="fa fa-desktop"></i> @lang('admin/ipblock.device')</span> <code>{{ substr($block->ip, 2, 10) }}…</code>@else<code>{{ $block->ip }}{{ str_contains($block->ip, ":") ? "/64" : "" }}</code>@endif</td>
                                 <td style="white-space:nowrap;">
                                     {{ $block->blocked_until->format('Y-m-d H:i:s') }}
                                     <br><small class="text-muted">@lang('admin/ipblock.remaining', ['time' => $block->blocked_until->diffForHumans(null, true)])</small>
@@ -129,7 +129,8 @@
                                 <td style="white-space:nowrap;">{{ $failure->created_at->format('Y-m-d H:i:s') }}</td>
                                 <td>
                                     <code>{{ $failure->ip }}</code>
-                                    @if($lockout->isExempt($failure->ip))<small class="text-muted">({{ trans('admin/ipblock.never_blocked') }})</small>@endif
+                                    @if($failure->ip === 'unknown' || $lockout::isSharedProxy($failure->ip))<small class="text-muted">({{ trans('admin/ipblock.shared_address') }})</small>@elseif($lockout->isExempt($failure->ip))<small class="text-muted">({{ trans('admin/ipblock.never_blocked') }})</small>@endif
+                                    @if($failure->device)<small class="text-muted" title="{{ $failure->device }}"><i class="fa fa-desktop"></i> {{ substr($failure->device, 2, 6) }}</small>@endif
                                 </td>
                                 <td>{{ $failure->username ?? '—' }}</td>
                                 <td>@lang('admin/ipblock.kind.' . $failure->type)</td>
@@ -185,7 +186,7 @@
                             </tr>
                             @foreach($history as $block)
                                 <tr>
-                                    <td><code>{{ $block->ip }}{{ str_contains($block->ip, ":") ? "/64" : "" }}</code></td>
+                                    <td>@if($block->isDevice())<span class="label label-info" title="{{ $block->ip }}"><i class="fa fa-desktop"></i> @lang('admin/ipblock.device')</span> <code>{{ substr($block->ip, 2, 10) }}…</code>@else<code>{{ $block->ip }}{{ str_contains($block->ip, ":") ? "/64" : "" }}</code>@endif</td>
                                     <td style="white-space:nowrap;">{{ $block->created_at->format('Y-m-d H:i') }}</td>
                                     <td>@lang('admin/ipblock.history_status.' . ($block->unblocked_at ? 'lifted' : 'expired'))</td>
                                 </tr>

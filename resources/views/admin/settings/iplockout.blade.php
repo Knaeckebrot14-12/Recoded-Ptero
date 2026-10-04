@@ -66,7 +66,7 @@
                         </div>
                         <p class="small">
                             @lang('admin/ipblock.settings.your_ip', ['ip' => $currentIp])
-                            @if($currentIpExempt)<br><span class="text-muted">@lang('admin/ipblock.settings.your_ip_private')</span>@endif
+                            <br><span class="text-muted">@lang('admin/ipblock.settings.mode_' . $currentMode)</span>
                         </p>
                     </div>
                     <div class="box-footer">

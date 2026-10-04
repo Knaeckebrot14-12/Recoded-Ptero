@@ -60,6 +60,14 @@ class IpBlock extends Model
     }
 
     /**
+     * A block of a browser (device cookie) instead of an IP address; `ip` then holds "d:<hash>".
+     */
+    public function isDevice(): bool
+    {
+        return str_starts_with($this->ip, 'd:');
+    }
+
+    /**
      * @return string[]
      */
     public function usernameList(): array

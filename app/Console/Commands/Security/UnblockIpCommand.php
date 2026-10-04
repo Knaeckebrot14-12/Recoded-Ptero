@@ -11,15 +11,15 @@ use Pterodactyl\Services\Security\IpLockoutService;
  */
 class UnblockIpCommand extends Command
 {
-    protected $description = 'Lift the automatic login block of an IP address.';
+    protected $description = 'Lift the automatic login block of an IP address or a browser ("d:...", shown on the Blocked IPs page).';
 
-    protected $signature = 'p:security:unblock-ip {ip : The IP address to unblock}';
+    protected $signature = 'p:security:unblock-ip {ip : The IP address (or browser id "d:<hash>") to unblock}';
 
     public function handle(IpLockoutService $lockout): int
     {
         $ip = (string) $this->argument('ip');
-        if (filter_var($ip, FILTER_VALIDATE_IP) === false) {
-            $this->error('That is not a valid IP address.');
+        if (filter_var($ip, FILTER_VALIDATE_IP) === false && !preg_match('/^d:[a-f0-9]{40}$/', $ip)) {
+            $this->error('That is not a valid IP address or browser id.');
 
             return self::FAILURE;
         }

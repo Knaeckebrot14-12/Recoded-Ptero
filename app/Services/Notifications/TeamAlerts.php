@@ -69,7 +69,8 @@ class TeamAlerts
             return;
         }
 
-        $ip = $block->ip;
+        // A browser is shown as "Browser d:abc123…", never with its full id.
+        $ip = $block->isDevice() ? trans('admin/ipblock.device') . ' ' . substr($block->ip, 0, 8) . '…' : $block->ip;
         $failures = $block->failures;
         $minutes = max(1, (int) round($block->created_at->diffInMinutes($block->blocked_until, true)));
         $until = $block->blocked_until->copy()->setTimezone(config('app.timezone'))->format('d.m.Y H:i T');

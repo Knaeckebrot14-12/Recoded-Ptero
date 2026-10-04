@@ -2,6 +2,7 @@
 
 namespace Pterodactyl\Services\Security;
 
+use Illuminate\Http\Request;
 use Pterodactyl\Models\User;
 use Pterodactyl\Models\IpBlock;
 use Illuminate\Support\Facades\Cache;
@@ -24,6 +25,22 @@ use Pterodactyl\Services\Notifications\DiscordWebhook;
  */
 class IpLockoutService
 {
+    /** Name of the browser cookie that tells one browser from another (random, set on the sign-in pages). */
+    public const DEVICE_COOKIE = 'mcpanel_device';
+
+    /**
+     * Cloudflare's published address ranges (cloudflare.com/ips). A request that arrives from one of
+     * them comes through a shared server that serves many unrelated visitors, so such an address is
+     * never blocked; the visitor's own address is taken from Cloudflare's CF-Connecting-IP header.
+     */
+    public const CLOUDFLARE_RANGES = [
+        '173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22', '141.101.64.0/18',
+        '108.162.192.0/18', '190.93.240.0/20', '188.114.96.0/20', '197.234.240.0/22', '198.41.128.0/17',
+        '162.158.0.0/15', '104.16.0.0/13', '104.24.0.0/14', '172.64.0.0/13', '131.0.72.0/22',
+        '2400:cb00::/32', '2606:4700::/32', '2803:f800::/32', '2405:b500::/32', '2405:8100::/32',
+        '2a06:98c0::/29', '2c0f:f248::/32',
+    ];
+
     /** Without a new block for this long, the next block is a first block again. */
     public const ESCALATION_DAYS = 7;
 
@@ -177,9 +194,91 @@ class IpLockoutService
             return true;
         }
 
+        return $this->isAllowlisted($ip);
+    }
+
+    public function isAllowlisted(?string $ip): bool
+    {
+        $ip = self::normalize($ip);
         $allowlist = $this->allowlist();
 
-        return $allowlist !== [] && IpUtils::checkIp($ip, $allowlist);
+        return $ip !== '' && $allowlist !== [] && IpUtils::checkIp($ip, $allowlist);
+    }
+
+    /**
+     * A shared server in front of the panel (Cloudflare): many unrelated visitors arrive from it.
+     */
+    public static function isSharedProxy(?string $ip): bool
+    {
+        $ip = self::normalize($ip);
+
+        return $ip !== '' && filter_var($ip, FILTER_VALIDATE_IP) !== false && IpUtils::checkIp($ip, self::CLOUDFLARE_RANGES);
+    }
+
+    /**
+     * The address of the visitor himself, or null when it can't be told. Behind Cloudflare the address
+     * the panel sees belongs to a Cloudflare server, so the visitor's own address is read from
+     * CF-Connecting-IP, and only then: a request from any other address could send that header with
+     * whatever it likes. Without a usable header a shared address is never used, so nobody innocent
+     * is blocked by it (the browser cookie still works).
+     */
+    public function clientIp(Request $request): ?string
+    {
+        $ip = self::normalize($request->ip());
+        if ($ip === '') {
+            return null;
+        }
+        if (!self::isSharedProxy($ip)) {
+            return $ip;
+        }
+
+        $real = self::normalize((string) $request->headers->get('CF-Connecting-IP', ''));
+        $usable = $real !== '' && filter_var($real, FILTER_VALIDATE_IP) !== false && !self::isSharedProxy($real) && !self::isPrivate($real);
+
+        return $usable ? $real : null;
+    }
+
+    /**
+     * How the panel sees the visitor, for the settings page:
+     *  real       an address that can be blocked
+     *  cloudflare the visitor's own address, read from Cloudflare's header
+     *  shared     a shared (Cloudflare) address without a usable header: only the browser can be blocked
+     *  private    a private address (proxy not told apart): only the browser can be blocked
+     *
+     * @return array{mode: string, ip: string}
+     */
+    public function describeClient(Request $request): array
+    {
+        $seen = self::normalize($request->ip());
+        $client = $this->clientIp($request);
+
+        return match (true) {
+            $client === null => ['mode' => 'shared', 'ip' => $seen],
+            $client !== $seen => ['mode' => 'cloudflare', 'ip' => $client],
+            self::isPrivate($client) => ['mode' => 'private', 'ip' => $client],
+            default => ['mode' => 'real', 'ip' => $client],
+        };
+    }
+
+    /**
+     * The browser cookie of the request, if it has a valid one.
+     */
+    public static function deviceId(Request $request): ?string
+    {
+        $id = $request->attributes->get('mcpanel_device_id') ?? $request->cookies->get(self::DEVICE_COOKIE);
+
+        return is_string($id) && preg_match('/^[a-f0-9]{32}$/', $id) ? $id : null;
+    }
+
+    /**
+     * What a browser is stored under in the block list: "d:" + a hash of its cookie (the cookie itself
+     * is never stored).
+     */
+    public static function deviceKey(Request $request): ?string
+    {
+        $id = self::deviceId($request);
+
+        return $id === null ? null : 'd:' . substr(hash('sha256', $id), 0, 40);
     }
 
     public function activeBlock(?string $ip): ?IpBlock
@@ -211,6 +310,110 @@ class IpLockoutService
 
             return null;
         }
+    }
+
+    /**
+     * The block that applies to this request, if any: the visitor's own address and his browser are
+     * both checked. Never returns anything while the feature is off or for a request from an address on
+     * the staff allowlist. Fails open like blockFor().
+     */
+    public function blockForRequest(Request $request): ?IpBlock
+    {
+        try {
+            if (!$this->enabled()) {
+                return null;
+            }
+            $client = $this->clientIp($request);
+            if ($client !== null && $this->isAllowlisted($client)) {
+                return null;
+            }
+
+            foreach ($this->subjects($request, $client) as $subject) {
+                if ($block = $this->activeBlock($subject)) {
+                    return $block;
+                }
+            }
+
+            return null;
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            return null;
+        }
+    }
+
+    /**
+     * What this request can be blocked as: the visitor's own address (when it is known and not a
+     * private one) and his browser.
+     *
+     * @return string[]
+     */
+    private function subjects(Request $request, ?string $client): array
+    {
+        $subjects = [];
+        if ($client !== null && !self::isPrivate($client)) {
+            $subjects[] = self::bucket($client);
+        }
+        if ($device = self::deviceKey($request)) {
+            $subjects[] = $device;
+        }
+
+        return $subjects;
+    }
+
+    /**
+     * Counts a failed login or 2FA attempt of this request and blocks the visitor's address and/or his
+     * browser once one of them reached the limit. A shared address (Cloudflare) is never blocked.
+     *
+     * @return IpBlock|null the new block, if this attempt caused one
+     */
+    public function recordFailureForRequest(Request $request, ?string $username, string $type = 'login'): ?IpBlock
+    {
+        if (!$this->enabled()) {
+            return null;
+        }
+
+        try {
+            $client = $this->clientIp($request);
+            $device = self::deviceKey($request);
+            $stored = self::bucket($client ?? self::normalize($request->ip()));
+            if ($stored === '' && $device === null) {
+                return null;
+            }
+
+            LoginFailure::query()->create([
+                'ip' => $stored !== '' ? $stored : 'unknown',
+                'device' => $device,
+                'username' => $username !== null && $username !== '' ? mb_substr(mb_strtolower($username), 0, 191) : null,
+                'type' => $type,
+            ]);
+
+            if ($client !== null && $this->isAllowlisted($client)) {
+                return null;
+            }
+
+            $block = null;
+            foreach ($this->subjects($request, $client) as $subject) {
+                $block ??= $this->blockSubjectIfOverLimit($subject);
+            }
+
+            return $block;
+        } catch (\Throwable $exception) {
+            // Counting must never make a login request fail.
+            report($exception);
+
+            return null;
+        }
+    }
+
+    private function blockSubjectIfOverLimit(string $subject): ?IpBlock
+    {
+        if ($this->activeBlock($subject)) {
+            return null;
+        }
+
+        // One at a time per subject: parallel failures must not each create their own (escalating) block.
+        return Cache::lock('ip-lockout:' . $subject, 10)->block(5, fn () => $this->blockIfOverLimit($subject, str_starts_with($subject, 'd:') ? 'device' : 'ip'));
     }
 
     /**
@@ -255,20 +458,21 @@ class IpLockoutService
      * Creates the block if the failures since the IP's latest block (or inside the window) reached the limit.
      * Runs inside a per-IP lock.
      */
-    private function blockIfOverLimit(string $ip): ?IpBlock
+    private function blockIfOverLimit(string $ip, string $column = 'ip'): ?IpBlock
     {
         // Another request may have blocked the IP while this one waited for the lock.
         if ($this->activeBlock($ip)) {
             return null;
         }
 
-        // Only failures after the IP's latest block count: when a block is shorter than the window,
-        // the failures that caused it must not block the IP again with its first typo afterwards.
+        // Only failures after the latest block count: when a block is shorter than the window, the
+        // failures that caused it must not block again with the first typo afterwards.
+        // $column is "ip" for an address and "device" for a browser (then $ip holds the "d:" key).
         $since = now()->subMinutes($this->windowMinutes());
         $lastBlock = IpBlock::query()->where('ip', $ip)->orderByDesc('id')->first();
-        $window = LoginFailure::query()->where('ip', $ip)->where('created_at', '>=', $since);
+        $window = LoginFailure::query()->where($column, $ip)->where('created_at', '>=', $since);
         if ($lastBlock && $lastBlock->created_at->greaterThanOrEqualTo($since)) {
-            $window = LoginFailure::query()->where('ip', $ip)->where('created_at', '>', $lastBlock->created_at);
+            $window = LoginFailure::query()->where($column, $ip)->where('created_at', '>', $lastBlock->created_at);
         }
         $count = (clone $window)->count();
         if ($count < $this->maxAttempts()) {
@@ -320,6 +524,40 @@ class IpLockoutService
     }
 
     /**
+     * A successful login of this request clears the failures of the account that was used, for the
+     * visitor's address and for his browser.
+     *
+     * @param string[] $usernames
+     */
+    public function recordSuccessForRequest(Request $request, array $usernames): void
+    {
+        try {
+            $client = $this->clientIp($request);
+            $usernames = array_values(array_filter(array_map(fn ($name) => mb_strtolower((string) $name), $usernames)));
+            if ($usernames === []) {
+                return;
+            }
+
+            $query = LoginFailure::query()->whereIn('username', $usernames);
+            $device = self::deviceKey($request);
+            $ip = $client !== null ? self::bucket($client) : '';
+            $query->where(function ($q) use ($ip, $device) {
+                if ($ip !== '') {
+                    $q->orWhere('ip', $ip);
+                }
+                if ($device !== null) {
+                    $q->orWhere('device', $device);
+                }
+            });
+            if ($ip !== '' || $device !== null) {
+                $query->delete();
+            }
+        } catch (\Throwable $exception) {
+            report($exception);
+        }
+    }
+
+    /**
      * Blocks an IP by hand. An existing block of the IP is replaced instead of stacked.
      *
      * @throws \InvalidArgumentException when the address can never be blocked
@@ -359,13 +597,15 @@ class IpLockoutService
      */
     public function unblock(string $ip, ?User $actor): int
     {
-        $ip = self::bucket($ip);
+        // An address, or a browser ("d:<hash>").
+        $isDevice = str_starts_with($ip, 'd:');
+        $ip = $isDevice ? $ip : self::bucket($ip);
 
         $lifted = IpBlock::query()->active()->where('ip', $ip)->update([
             'unblocked_at' => now(),
             'unblocked_by' => $actor?->id,
         ]);
-        LoginFailure::query()->where('ip', $ip)->delete();
+        LoginFailure::query()->where($isDevice ? 'device' : 'ip', $ip)->delete();
 
         return $lifted;
     }

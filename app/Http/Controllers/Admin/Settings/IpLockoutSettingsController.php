@@ -22,9 +22,12 @@ class IpLockoutSettingsController extends Controller
 
     public function index(Request $request): View
     {
+        $client = $this->lockout->describeClient($request);
+
         return view('admin.settings.iplockout', [
-            'currentIp' => $request->ip(),
-            'currentIpExempt' => $this->lockout->isExempt($request->ip()),
+            'currentIp' => $client['ip'],
+            // real | cloudflare | shared | private: what can be blocked for this visitor, see IpLockoutService::describeClient().
+            'currentMode' => $client['mode'],
         ]);
     }
 
