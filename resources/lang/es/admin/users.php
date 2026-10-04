@@ -90,7 +90,7 @@ return [
         'delete_button' => 'Eliminar usuario',
         'roles' => [
             'heading' => 'Rol',
-            'description' => 'Cambia lo que este usuario puede hacer en el área de administración. Solo puedes cambiar los roles de usuarios de rango inferior al tuyo.',
+            'description' => 'Cambia lo que este usuario puede hacer en el área de administración. Solo puedes cambiar los roles de usuarios de rango inferior al tuyo. El propietario principal (el primer propietario) también puede cambiar el rol de otros propietarios.',
             'current' => 'Rol actual',
             'save' => 'Guardar rol',
             'rank_too_low' => 'Solo puedes gestionar usuarios de rango inferior al tuyo.',

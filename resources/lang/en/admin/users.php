@@ -90,7 +90,7 @@ return [
         'delete_button' => 'Delete User',
         'roles' => [
             'heading' => 'Role',
-            'description' => 'Change what this user may do inside the admin area. You can only change the roles of users ranked below you.',
+            'description' => 'Change what this user may do inside the admin area. You can only change the roles of users ranked below you. The main owner (the first owner) can also change the role of other owners.',
             'current' => 'Current role',
             'save' => 'Save Role',
             'rank_too_low' => 'You can only manage users ranked below you.',

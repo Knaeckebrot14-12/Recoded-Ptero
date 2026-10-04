@@ -90,7 +90,7 @@ return [
         'delete_button' => 'Benutzer löschen',
         'roles' => [
             'heading' => 'Rolle',
-            'description' => 'Lege fest, was dieser Benutzer im Admin-Bereich tun darf. Du kannst nur die Rollen von Benutzern ändern, die unter dir stehen.',
+            'description' => 'Lege fest, was dieser Benutzer im Admin-Bereich tun darf. Du kannst nur die Rollen von Benutzern ändern, die unter dir stehen. Der Haupt-Owner (der erste Owner) kann auch die Rolle anderer Owner ändern.',
             'current' => 'Aktuelle Rolle',
             'save' => 'Rolle speichern',
             'rank_too_low' => 'Du kannst nur Benutzer verwalten, die unter dir stehen.',

@@ -325,7 +325,27 @@ class User extends Model implements
      */
     public function outranks(User $other): bool
     {
+        // The main owner may also manage (and demote) the other owners they handed the role to.
+        if ($this->isMainOwner() && $other->isOwner() && !$this->is($other)) {
+            return true;
+        }
+
         return $this->roleRank() > $other->roleRank();
+    }
+
+    /**
+     * The main owner is the first owner of the panel (the owner account with the lowest ID, which
+     * is the account the installer made). Owners given the role later can't take it from them.
+     */
+    public function isMainOwner(): bool
+    {
+        if (!$this->isOwner()) {
+            return false;
+        }
+
+        $first = static::query()->where('role', self::ROLE_OWNER)->orderBy('id')->value('id');
+
+        return $first === null || (int) $first === (int) $this->id;
     }
 
     /**

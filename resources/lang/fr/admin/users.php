@@ -90,7 +90,7 @@ return [
         'delete_button' => 'Supprimer l\'utilisateur',
         'roles' => [
             'heading' => 'Rôle',
-            'description' => 'Modifiez ce que cet utilisateur peut faire dans la zone d\'administration. Vous ne pouvez modifier que les rôles des utilisateurs de rang inférieur au vôtre.',
+            'description' => 'Modifiez ce que cet utilisateur peut faire dans la zone d\'administration. Vous ne pouvez modifier que les rôles des utilisateurs de rang inférieur au vôtre. Le propriétaire principal (le premier propriétaire) peut aussi modifier le rôle des autres propriétaires.',
             'current' => 'Rôle actuel',
             'save' => 'Enregistrer le rôle',
             'rank_too_low' => 'Vous ne pouvez gérer que les utilisateurs de rang inférieur au vôtre.',
