@@ -732,9 +732,9 @@ setup_game_database() {
     fi
 
     if port_in_use 3306; then
-        warn "Port 3306 is already used by another database server, so none was set up for game servers."
-        warn "Add it yourself under Admin > Databases > Create New."
-        return 1
+        # A MySQL/MariaDB already runs here (e.g. the one of the old Pterodactyl panel): use it.
+        adopt_local_mysql
+        return $?
     fi
 
     mkdir -p "$(dirname "$GAMEDB_ENV")"
@@ -756,12 +756,42 @@ EOF
     open_firewall_ports 3306/tcp
 }
 
+# The address of the game database server: the node's address, or 127.0.0.1 for a MySQL that only
+# listens on this machine (adopt_local_mysql writes DB_HOST then).
+gamedb_host() {
+    local host
+    host="$(gamedb_value DB_HOST)"
+    echo "${host:-${NODE_FQDN:-$(public_ip)}}"
+}
+
+# 127.0.0.1 is forwarded into the panel container by the hostdb service (see hostdb-relay.sh).
+ensure_hostdb_target() {
+    local target="$1" current
+    current="$(env_value HOSTDB_TARGETS)"
+    case ",$current," in *",$target,"*) return 0 ;; esac
+    set_env_value HOSTDB_TARGETS "${current:+$current,}$target"
+    set_env_value COMPOSE_PROFILES hostdb
+    local port; port="$(env_value HTTP_PORT)"; port="${port:-80}"
+    run_step "Applying the settings" "Settings applied" dc up -d || return 1
+    run_step "Waiting for the panel" "Panel is running" wait_for_panel "$port"
+}
+
 # Panel on this machine: add the database server in the panel directly.
 register_game_database_local() {
-    local id
-    id="$(dc exec -T panel php artisan p:database-host:quick-setup --host="$NODE_FQDN" --port=3306 \
+    local id host
+    host="$(gamedb_host)"
+    [ "$host" = "127.0.0.1" ] && { ensure_hostdb_target 127.0.0.1:3306 || warn "Could not set up the forwarding to the database server."; }
+    id="$(dc exec -T panel php artisan p:database-host:quick-setup --host="$host" --port=3306 \
         --username="$(gamedb_value MARIADB_USER)" --password="$(gamedb_value MARIADB_PASSWORD)" \
         --node="${NODE_ID:-}" 2>&1 | tr -d '\r' | tail -n1)"
+    if ! [[ "$id" =~ ^[0-9]+$ ]] && [ "$host" != "127.0.0.1" ] && [ "$(gamedb_value ADOPTED)" = "1" ]; then
+        # The public address isn't reachable from the panel's container: use the forwarded local one.
+        if ensure_hostdb_target 127.0.0.1:3306; then
+            id="$(dc exec -T panel php artisan p:database-host:quick-setup --host=127.0.0.1 --port=3306 \
+                --username="$(gamedb_value MARIADB_USER)" --password="$(gamedb_value MARIADB_PASSWORD)" \
+                --node="${NODE_ID:-}" 2>&1 | tr -d '\r' | tail -n1)"
+        fi
+    fi
     if [[ "$id" =~ ^[0-9]+$ ]]; then
         ok "Database host added to the panel: users can now create databases for their servers"
     else
@@ -770,11 +800,115 @@ register_game_database_local() {
     fi
 }
 
+# Runs the SQL on stdin as an administrator of the MySQL/MariaDB on this machine (see find_host_sql_admin).
+host_sql() {
+    case "$HSQL_MODE" in
+        socket) "$HSQL_BIN" -N -B -uroot ;;
+        debian) "$HSQL_BIN" --defaults-file=/etc/mysql/debian.cnf -N -B ;;
+        login) MYSQL_PWD="$HSQL_PASS" "$HSQL_BIN" -N -B -h127.0.0.1 -P3306 -u"$HSQL_USER" ;;
+        docker) docker run --rm -i --network host -e MYSQL_PWD="$HSQL_PASS" mariadb:11 mariadb -N -B -h127.0.0.1 -P3306 -u"$HSQL_USER" ;;
+        *) return 1 ;;
+    esac 2>>"$INSTALL_LOG"
+}
+
+# Finds a way to administer the MySQL on port 3306: root through its socket (the Debian/Ubuntu
+# default), the maintenance account, or an account the user types in. Sets HSQL_MODE and friends.
+find_host_sql_admin() {
+    HSQL_BIN=""; HSQL_MODE=""; HSQL_USER=""; HSQL_PASS=""
+    command -v mariadb >/dev/null 2>&1 && HSQL_BIN=mariadb
+    [ -z "$HSQL_BIN" ] && command -v mysql >/dev/null 2>&1 && HSQL_BIN=mysql
+
+    if [ -n "$HSQL_BIN" ]; then
+        HSQL_MODE=socket
+        echo "SELECT 1" | host_sql >/dev/null 2>&1 && return 0
+        if [ -r /etc/mysql/debian.cnf ]; then
+            HSQL_MODE=debian
+            echo "SELECT 1" | host_sql >/dev/null 2>&1 && return 0
+        fi
+    fi
+
+    HSQL_MODE=login; [ -n "$HSQL_BIN" ] || HSQL_MODE=docker
+    local tries=0
+    while [ "$tries" -lt 3 ]; do
+        if [ "$tries" = "0" ]; then
+            echo "  The installer could not log in to that database server by itself."
+            echo "  Enter an administrator account of it (one that may create users, e.g. root); it is only used now and not stored."
+        fi
+        ask HSQL_USER "  MySQL admin user" "root"
+        ask_secret HSQL_PASS "  Password"
+        [ -n "$HSQL_PASS" ] || return 1
+        echo "SELECT 1" | host_sql >/dev/null 2>&1 && return 0
+        can_retry HSQL_USER || return 1
+        warn "That login was not accepted."
+        tries=$((tries + 1))
+    done
+    return 1
+}
+
+# Port 3306 is taken by a MySQL/MariaDB that already runs on this machine (e.g. the database of the
+# old Pterodactyl panel). Instead of giving up, a dedicated account for the panel is created in it
+# (all rights with GRANT OPTION, as Pterodactyl's database hosts need), and the panel registers it
+# like the container variant. The existing databases and accounts are not touched.
+adopt_local_mysql() {
+    local listen loopback=1 user pass host sql h
+    info "Port 3306 is used by a database server that already runs on this machine; using it for game servers."
+    if ! find_host_sql_admin; then
+        warn "No administrator access to that database server, so nothing was set up for game servers."
+        echo "     Create an account that may create databases and users in it, then add it yourself under"
+        echo "     Admin > Databases > Create New (or run this option again). Unattended: set MC_HSQL_USER and MC_HSQL_PASS."
+        return 1
+    fi
+
+    # Listening only on 127.0.0.1 (the usual default)? Then the panel reaches it through the forwarding.
+    listen="$(ss -ltnH 'sport = :3306' 2>/dev/null | awk '{print $4}')"
+    grep -qvE '^(127\.|\[::1\])' <<<"$listen" && loopback=0
+
+    mkdir -p "$(dirname "$GAMEDB_ENV")"
+    user="$(gamedb_value MARIADB_USER)"; pass="$(gamedb_value MARIADB_PASSWORD)"
+    if [ "$(gamedb_value ADOPTED)" != "1" ] || [ -z "$user" ] || [ -z "$pass" ]; then
+        user="recoded_panel"; pass="$(random_string 32)"
+        (
+            umask 077
+            cat > "$GAMEDB_ENV" <<EOF
+# Account of Recoded Ptero in the database server that already ran on this machine. Keep this file private.
+ADOPTED=1
+MARIADB_USER=$user
+MARIADB_PASSWORD=$pass
+DB_HOST=$([ "$loopback" = "1" ] && echo 127.0.0.1)
+EOF
+        )
+    fi
+    # The panel arrives from 127.0.0.1 (forwarding) or from Docker's 172.x addresses.
+    sql=""
+    for h in localhost 127.0.0.1 '172.%'; do
+        sql="$sql CREATE USER IF NOT EXISTS '$user'@'$h' IDENTIFIED BY '$pass';"
+        sql="$sql ALTER USER '$user'@'$h' IDENTIFIED BY '$pass';"
+        sql="$sql GRANT ALL PRIVILEGES ON *.* TO '$user'@'$h' WITH GRANT OPTION;"
+    done
+    sql="$sql FLUSH PRIVILEGES;"
+    if ! printf '%s\n' "$sql" | host_sql >/dev/null; then
+        warn "Could not create the account for the panel in the database server. See: $INSTALL_LOG"
+        return 1
+    fi
+    # MySQL 8's default login method needs a secure connection the panel's PHP can't use over TCP;
+    # the classic one works everywhere (a server that doesn't offer it simply keeps the default).
+    if ! echo "SELECT VERSION()" | host_sql 2>/dev/null | grep -qi mariadb; then
+        sql=""
+        for h in localhost 127.0.0.1 '172.%'; do
+            sql="$sql ALTER USER '$user'@'$h' IDENTIFIED WITH mysql_native_password BY '$pass';"
+        done
+        printf '%s\n' "$sql" | host_sql >/dev/null 2>&1 || true
+    fi
+    ok "Account '$user' for the panel created in the existing database server (its other databases and accounts are untouched)"
+    [ "$loopback" = "1" ] || echo "     It also listens on the network; open port 3306 in your firewall only if game servers on other machines need it."
+    return 0
+}
+
 print_game_database_details() {
     echo
     printf '%s%s%s\n' "$C_BOLD" "Add the database server in the panel" "$C_RESET"
     echo "  Admin > Databases > Create New, and enter:"
-    echo "    Host:         ${NODE_FQDN:-$(public_ip)}"
+    echo "    Host:         $(gamedb_host)"
     echo "    Port:         3306"
     echo "    Username:     $(gamedb_value MARIADB_USER)"
     echo "    Password:     $(gamedb_value MARIADB_PASSWORD)"
