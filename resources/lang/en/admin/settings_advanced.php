@@ -28,4 +28,9 @@ return [
     'phpmyadmin_heading' => 'phpMyAdmin',
     'phpmyadmin_url_label' => 'Address',
     'phpmyadmin_description' => 'Admins open phpMyAdmin under Databases with a host\'s account; users open their server\'s databases from the Databases tab (they need the permission to see the database password). There is no login page: phpMyAdmin only accepts sign-ins from the panel. Turning it off also signs everybody out of phpMyAdmin.',
+    'sleep_heading' => 'Sleep mode',
+    'sleep_default_label' => 'Default for servers',
+    'sleep_minutes_label' => 'Stop after nobody was on for',
+    'sleep_minutes_option' => ':count minutes',
+    'sleep_description' => 'A server nobody has been on for this long is stopped to free its memory. Players still see it in their server list, and when one joins, the server starts and they are told to reconnect in a moment. Servers can switch this on or off for themselves under Settings. The default applies to servers that did not choose, from their next start. Minecraft Java servers only; needs Wings 1.1.0 or newer.',
 ];

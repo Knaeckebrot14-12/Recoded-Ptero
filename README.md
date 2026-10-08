@@ -147,6 +147,14 @@ Under **Admin → Nodes** each node shows its usage; when a newer Wings release 
 
 Alerts are configured under **Admin → Settings → Monitoring** (Discord webhook, disk and memory thresholds). The same Discord channel can also get a message for every new support ticket and new registration.
 
+## Sleep mode
+
+A Minecraft Java server nobody has been on for a while is stopped to free its memory, and wakes up when a player connects. Servers switch it on under **Settings → Sleep when empty** (idle time 10 minutes to 4 hours); the panel-wide default for servers that did not choose is under **Admin → Settings → Advanced** (off by default, 30 minutes) and applies from the server's next start.
+
+- Wings asks the running server how many players are on (the normal server list ping, every 30 seconds). Only a clear "0 players" counts: a server that does not answer (still starting, not Minecraft, hung) is never put to sleep.
+- While it sleeps, Wings itself listens on the server's port. The server list shows a "sleeping" message (in the panel's language); a player who tries to join sees "the server is starting now, reconnect in about a minute" and the server is started. Starting it from the panel works as usual.
+- Servers that are suspended, installing, being transferred or restored are left alone. The Wings of the node must be 1.1.0 or newer (Settings shows a note otherwise); Bedrock servers are not covered.
+
 ## phpMyAdmin
 
 [phpMyAdmin](https://www.phpmyadmin.net) (GPL-2.0) is part of the panel image and runs at `https://<your panel>/phpmyadmin/` (no extra container, port or certificate). The image downloads the official release at build time and checks it against the SHA-256 pinned in the [`Dockerfile`](Dockerfile); the panel's configuration for it is in [`.github/docker/phpmyadmin`](.github/docker/phpmyadmin).

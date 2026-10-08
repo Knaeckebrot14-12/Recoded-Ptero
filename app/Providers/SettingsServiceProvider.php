@@ -94,6 +94,8 @@ class SettingsServiceProvider extends ServiceProvider
         'mcpanel:push:private_key',
         'mcpanel:roles:permissions',
         'mcpanel:phpmyadmin:enabled',
+        'mcpanel:sleep:enabled',
+        'mcpanel:sleep:minutes',
         'mcpanel:ip_lockout:enabled',
         'mcpanel:ip_lockout:max_attempts',
         'mcpanel:ip_lockout:window_minutes',

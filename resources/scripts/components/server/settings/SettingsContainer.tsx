@@ -8,6 +8,7 @@ import FlashMessageRender from '@/components/FlashMessageRender';
 import Can from '@/components/elements/Can';
 import ReinstallServerBox from '@/components/server/settings/ReinstallServerBox';
 import OwnershipBox from '@/components/server/settings/OwnershipBox';
+import SleepBox from '@/components/server/settings/SleepBox';
 import tw from 'twin.macro';
 import Input from '@/components/elements/Input';
 import Label from '@/components/elements/Label';
@@ -78,6 +79,9 @@ export default () => {
                         <div css={tw`mb-6 md:mb-10`}>
                             <RenameServerBox />
                         </div>
+                    </Can>
+                    <Can action={'settings.rename'}>
+                        <SleepBox />
                     </Can>
                     <Can action={'settings.reinstall'}>
                         <ReinstallServerBox />

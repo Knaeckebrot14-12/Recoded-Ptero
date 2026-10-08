@@ -17,7 +17,7 @@ return [
     'updater_dir' => env('MC_UPDATER_DIR', '/app/updater'),
 
     // Version of the Wings build the installer installs (GitHub release "wings-v<version>" of this repository).
-    'wings_version' => env('MC_PANEL_WINGS_VERSION', '1.0.0'),
+    'wings_version' => env('MC_PANEL_WINGS_VERSION', '1.1.0'),
 
     // Admin -> Settings -> Login & Registration.
     'registration' => [
@@ -126,5 +126,12 @@ return [
     // tab. Turned on and off by the owner under Admin -> Settings -> Advanced.
     'phpmyadmin' => [
         'enabled' => env('MC_PANEL_PHPMYADMIN', true),
+    ],
+
+    // Sleep mode: Wings stops a server nobody was on for "minutes" and starts it again when a player
+    // connects. The default for servers that didn't choose; set under Admin -> Settings -> Advanced.
+    'sleep' => [
+        'enabled' => env('MC_PANEL_SLEEP', false),
+        'minutes' => env('MC_PANEL_SLEEP_MINUTES', 30),
     ],
 ];

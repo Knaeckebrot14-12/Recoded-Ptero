@@ -52,6 +52,7 @@ class ServerConfigurationStructureService
             'environment' => $this->environment->handle($server),
             'invocation' => $server->startup,
             'skip_egg_scripts' => $server->skip_scripts,
+            'sleep' => app(SleepSettingsService::class)->forWings($server),
             'build' => [
                 'memory_limit' => $server->memory,
                 'swap' => $server->swap,

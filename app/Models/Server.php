@@ -205,6 +205,8 @@ class Server extends Model implements Identifiable
         'coin_reminder_for' => 'datetime',
         'auto_backup_hours' => 'integer',
         'auto_backup_last_at' => 'datetime',
+        'sleep_enabled' => 'boolean',
+        'sleep_minutes' => 'integer',
     ];
 
     /**

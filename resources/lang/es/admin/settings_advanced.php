@@ -28,4 +28,9 @@ return [
     'phpmyadmin_heading' => 'phpMyAdmin',
     'phpmyadmin_url_label' => 'Dirección',
     'phpmyadmin_description' => 'Los administradores abren phpMyAdmin en Bases de datos con la cuenta de un host; los usuarios abren las bases de datos de su servidor desde la pestaña Bases de datos (necesitan el permiso para ver la contraseña de la base de datos). No hay página de inicio de sesión: phpMyAdmin solo acepta inicios de sesión desde el panel. Al desactivarlo también se cierra la sesión de todos en phpMyAdmin.',
+    'sleep_heading' => 'Modo suspensión',
+    'sleep_default_label' => 'Valor predeterminado de los servidores',
+    'sleep_minutes_label' => 'Detener cuando nadie haya estado conectado durante',
+    'sleep_minutes_option' => ':count minutos',
+    'sleep_description' => 'Un servidor en el que nadie ha estado durante este tiempo se detiene para liberar su memoria. Los jugadores lo siguen viendo en su lista de servidores y, cuando uno se une, el servidor arranca y se le pide que vuelva a conectarse en un momento. Los servidores pueden activarlo o desactivarlo por sí mismos en Ajustes. El valor predeterminado se aplica a los servidores que no han elegido, desde su próximo arranque. Solo servidores de Minecraft Java; requiere Wings 1.1.0 o posterior.',
 ];

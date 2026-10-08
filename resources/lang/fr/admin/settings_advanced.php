@@ -28,4 +28,9 @@ return [
     'phpmyadmin_heading' => 'phpMyAdmin',
     'phpmyadmin_url_label' => 'Adresse',
     'phpmyadmin_description' => 'Les admins ouvrent phpMyAdmin sous Bases de données avec le compte d\'un hôte ; les utilisateurs ouvrent les bases de données de leur serveur depuis l\'onglet Bases de données (il leur faut la permission de voir le mot de passe de la base). Il n\'y a pas de page de connexion : phpMyAdmin n\'accepte que les connexions venant du panel. Le désactiver déconnecte aussi immédiatement tout le monde de phpMyAdmin.',
+    'sleep_heading' => 'Mode veille',
+    'sleep_default_label' => 'Valeur par défaut des serveurs',
+    'sleep_minutes_label' => 'Arrêter quand personne n\'était connecté depuis',
+    'sleep_minutes_option' => ':count minutes',
+    'sleep_description' => 'Un serveur sur lequel personne n\'est allé aussi longtemps est arrêté pour libérer sa mémoire. Les joueurs le voient toujours dans leur liste de serveurs, et quand l\'un d\'eux le rejoint, le serveur démarre et il est invité à se reconnecter dans un instant. Les serveurs peuvent l\'activer ou le désactiver eux-mêmes dans Paramètres. La valeur par défaut s\'applique aux serveurs qui n\'ont pas choisi, dès leur prochain démarrage. Serveurs Minecraft Java uniquement ; nécessite Wings 1.1.0 ou plus récent.',
 ];

@@ -142,6 +142,35 @@
                         <p class="text-muted small no-margin">@lang('admin/settings_advanced.phpmyadmin_description')</p>
                     </div>
                 </div>
+                <div class="box">
+                    <div class="box-header with-border">
+                        <h3 class="box-title">@lang('admin/settings_advanced.sleep_heading')</h3>
+                    </div>
+                    <div class="box-body">
+                        <div class="row">
+                            <div class="form-group col-md-6">
+                                <label class="control-label">@lang('admin/settings_advanced.sleep_default_label')</label>
+                                <div>
+                                    <select class="form-control" name="mcpanel:sleep:enabled">
+                                        <option value="false">@lang('admin/settings_advanced.disabled')</option>
+                                        <option value="true" @if(filter_var(old('mcpanel:sleep:enabled', \Pterodactyl\Services\Servers\SleepSettingsService::defaultEnabled()), FILTER_VALIDATE_BOOLEAN)) selected @endif>@lang('admin/settings_advanced.enabled')</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-group col-md-6">
+                                <label class="control-label">@lang('admin/settings_advanced.sleep_minutes_label')</label>
+                                <div>
+                                    <select class="form-control" name="mcpanel:sleep:minutes">
+                                        @foreach(\Pterodactyl\Services\Servers\SleepSettingsService::MINUTES as $minutes)
+                                            <option value="{{ $minutes }}" @if((int) old('mcpanel:sleep:minutes', \Pterodactyl\Services\Servers\SleepSettingsService::defaultMinutes()) === $minutes) selected @endif>@lang('admin/settings_advanced.sleep_minutes_option', ['count' => $minutes])</option>
+                                        @endforeach
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <p class="text-muted small no-margin">@lang('admin/settings_advanced.sleep_description')</p>
+                    </div>
+                </div>
                 <div class="box box-primary">
                     <div class="box-footer">
                         {{ csrf_field() }}

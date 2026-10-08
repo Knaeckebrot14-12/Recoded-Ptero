@@ -1,3 +1,17 @@
+diff --git a/cmd/root.go b/cmd/root.go
+index c288539..7cc3a27 100644
+--- a/cmd/root.go
++++ b/cmd/root.go
+@@ -190,6 +190,9 @@ func rootCmdRun(cmd *cobra.Command, _ []string) {
+ 		}
+ 	}()
+ 
++	// Recoded Ptero: stop servers nobody is on (sleep mode) and wake them when a player connects.
++	server.StartSleepMonitor(cmd.Context(), manager)
++
+ 	// Create a new workerpool that limits us to 4 servers being bootstrapped at a time
+ 	// on Wings. This allows us to ensure the environment exists, write configurations,
+ 	// and reboot processes without causing a slow-down due to sequential booting.
 diff --git a/router/router.go b/router/router.go
 index bdac760..3abb2d2 100644
 --- a/router/router.go
@@ -257,6 +271,20 @@ index 0000000..6090408
 +	}
 +	return float64(int64(v*p+0.5)) / p
 +}
+diff --git a/server/configuration.go b/server/configuration.go
+index 387aba8..b08a1c5 100644
+--- a/server/configuration.go
++++ b/server/configuration.go
+@@ -55,6 +55,9 @@ type Configuration struct {
+ 	Mounts                []Mount                 `json:"mounts"`
+ 	Egg                   EggConfiguration        `json:"egg,omitempty"`
+ 
++	// Recoded Ptero: sleep mode settings from the panel (see sleep_recoded.go).
++	Sleep SleepConfiguration `json:"sleep"`
++
+ 	Container struct {
+ 		// Defines the Docker image that will be used for this server
+ 		Image string `json:"image,omitempty"`
 diff --git a/server/crash.go b/server/crash.go
 index 3439c4a..35b62df 100644
 --- a/server/crash.go
@@ -280,3 +308,521 @@ index 3439c4a..35b62df 100644
  	c := s.crasher.LastCrashTime()
  	timeout := config.Get().System.CrashDetection.Timeout
  
+diff --git a/server/power.go b/server/power.go
+index 9952156..7fc4943 100644
+--- a/server/power.go
++++ b/server/power.go
+@@ -169,6 +169,9 @@ func (s *Server) HandlePowerAction(action PowerAction, waitSeconds ...int) error
+ // Execute a few functions before actually calling the environment start commands. This ensures
+ // that everything is ready to go for environment booting, and that the server can even be started.
+ func (s *Server) onBeforeStart() error {
++	// Recoded Ptero: a sleeping server stops being stood in for, so it can bind its own port.
++	s.sleepRelease()
++
+ 	s.Log().Info("syncing server configuration with panel")
+ 	if err := s.Sync(); err != nil {
+ 		return errors.WithMessage(err, "unable to sync server data from Panel instance")
+diff --git a/server/sleep_recoded.go b/server/sleep_recoded.go
+new file mode 100644
+index 0000000..abbc777
+--- /dev/null
++++ b/server/sleep_recoded.go
+@@ -0,0 +1,498 @@
++package server
++
++// Recoded Ptero: sleep mode. A Minecraft server nobody has been on for a while is stopped to free
++// its memory. While it sleeps, Wings itself listens on the server's port: the server list shows a
++// "sleeping" message, and the first player who tries to join gets a "starting now" screen and the
++// server is started. The settings come from the panel (the "sleep" block of the server configuration).
++
++import (
++	"bufio"
++	"bytes"
++	"context"
++	"encoding/binary"
++	"encoding/json"
++	"fmt"
++	"io"
++	"net"
++	"os"
++	"path/filepath"
++	"strconv"
++	"sync"
++	"time"
++
++	"github.com/apex/log"
++
++	"github.com/pterodactyl/wings/config"
++	"github.com/pterodactyl/wings/environment"
++)
++
++// SleepConfiguration is the "sleep" block the panel sends with a server's configuration.
++type SleepConfiguration struct {
++	Enabled bool `json:"enabled"`
++	// Minutes nobody has to be on the server before it is stopped.
++	Minutes int `json:"minutes"`
++	// Motd is shown in the server list while the server sleeps, Starting when a player tries to join.
++	Motd     string `json:"motd"`
++	Starting string `json:"starting"`
++}
++
++const (
++	sleepTickInterval = 30 * time.Second
++	sleepMinMinutes   = 5
++	sleepIOTimeout    = 8 * time.Second
++	// A Minecraft packet is a few hundred bytes; anything much bigger is not a client we want to serve.
++	sleepMaxPacket = 1 << 15
++)
++
++// sleepSettings returns a copy of the server's sleep settings.
++func (s *Server) sleepSettings() SleepConfiguration {
++	s.cfg.mu.RLock()
++	defer s.cfg.mu.RUnlock()
++
++	c := s.cfg.Sleep
++	if c.Minutes < sleepMinMinutes {
++		c.Minutes = sleepMinMinutes
++	}
++	if c.Motd == "" {
++		c.Motd = "This server is sleeping - join to wake it up"
++	}
++	if c.Starting == "" {
++		c.Starting = "The server was sleeping and is starting now. Please reconnect in about a minute."
++	}
++
++	return c
++}
++
++// sleepers holds the listeners that stand in for sleeping servers, by server ID.
++var sleepers = struct {
++	sync.Mutex
++	m map[string]*sleeper
++}{m: map[string]*sleeper{}}
++
++type sleeper struct {
++	s     *Server
++	ln    net.Listener
++	woken sync.Once
++}
++
++func sleepMarkerPath(id string) string {
++	return filepath.Join(config.Get().System.RootDirectory, "sleeping", id)
++}
++
++func sleepMarked(id string) bool {
++	_, err := os.Stat(sleepMarkerPath(id))
++	return err == nil
++}
++
++func sleepMark(id string) {
++	p := sleepMarkerPath(id)
++	if err := os.MkdirAll(filepath.Dir(p), 0o700); err == nil {
++		_ = os.WriteFile(p, []byte(time.Now().UTC().Format(time.RFC3339)), 0o600)
++	}
++}
++
++// sleepRelease stops standing in for the server (frees its port) and forgets that it was sleeping.
++// It is called before every start, so the server can bind its own port.
++func (s *Server) sleepRelease() {
++	id := s.ID()
++
++	sleepers.Lock()
++	sl := sleepers.m[id]
++	delete(sleepers.m, id)
++	sleepers.Unlock()
++
++	if sl != nil {
++		_ = sl.ln.Close()
++	}
++	_ = os.Remove(sleepMarkerPath(id))
++}
++
++// sleepArm starts listening on the server's port.
++func (s *Server) sleepArm() error {
++	id := s.ID()
++
++	sleepers.Lock()
++	defer sleepers.Unlock()
++	if sleepers.m[id] != nil {
++		return nil
++	}
++
++	m := s.Config().Allocations.DefaultMapping
++	if m.Port < 1 || m.Port > 65535 {
++		return fmt.Errorf("server has no valid default port")
++	}
++	host := m.Ip
++	if host == "0.0.0.0" {
++		host = ""
++	}
++	ln, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(m.Port)))
++	if err != nil {
++		return err
++	}
++
++	sl := &sleeper{s: s, ln: ln}
++	sleepers.m[id] = sl
++	go sl.serve()
++
++	return nil
++}
++
++func (sl *sleeper) serve() {
++	for {
++		conn, err := sl.ln.Accept()
++		if err != nil {
++			return
++		}
++		go sl.handle(conn)
++	}
++}
++
++// wake starts the server (once, however many players knock at the same time).
++func (sl *sleeper) wake() {
++	sl.woken.Do(func() {
++		go func() {
++			s := sl.s
++			s.sleepRelease()
++			s.PublishConsoleOutputFromDaemon("A player tried to join the sleeping server, starting it now.")
++			if err := s.HandlePowerAction(PowerActionStart); err != nil {
++				s.Log().WithField("error", err).Warn("failed to start a sleeping server for a joining player")
++			}
++		}()
++	})
++}
++
++// ---------------------------------------------------------------- Minecraft protocol (Java)
++
++func readVarInt(r io.ByteReader) (int, error) {
++	var n, shift uint
++	for i := 0; i < 5; i++ {
++		b, err := r.ReadByte()
++		if err != nil {
++			return 0, err
++		}
++		n |= uint(b&0x7f) << shift
++		if b&0x80 == 0 {
++			return int(int32(uint32(n))), nil
++		}
++		shift += 7
++	}
++	return 0, fmt.Errorf("VarInt is too long")
++}
++
++func writeVarInt(w *bytes.Buffer, v int) {
++	u := uint32(v)
++	for {
++		if u&^0x7f == 0 {
++			w.WriteByte(byte(u))
++			return
++		}
++		w.WriteByte(byte(u&0x7f) | 0x80)
++		u >>= 7
++	}
++}
++
++func writeString(w *bytes.Buffer, v string) {
++	writeVarInt(w, len(v))
++	w.WriteString(v)
++}
++
++// readPacket reads one length-prefixed packet and returns its ID and the rest of its payload.
++func readPacket(r *bufio.Reader) (int, *bytes.Reader, error) {
++	length, err := readVarInt(r)
++	if err != nil {
++		return 0, nil, err
++	}
++	if length < 1 || length > sleepMaxPacket {
++		return 0, nil, fmt.Errorf("unexpected packet size %d", length)
++	}
++	buf := make([]byte, length)
++	if _, err := io.ReadFull(r, buf); err != nil {
++		return 0, nil, err
++	}
++	pr := bytes.NewReader(buf)
++	id, err := readVarInt(pr)
++	if err != nil {
++		return 0, nil, err
++	}
++
++	return id, pr, nil
++}
++
++func writePacket(w io.Writer, id int, body []byte) error {
++	var inner bytes.Buffer
++	writeVarInt(&inner, id)
++	inner.Write(body)
++
++	var out bytes.Buffer
++	writeVarInt(&out, inner.Len())
++	out.Write(inner.Bytes())
++	_, err := w.Write(out.Bytes())
++
++	return err
++}
++
++func readString(r *bytes.Reader) (string, error) {
++	n, err := readVarInt(r)
++	if err != nil || n < 0 || n > sleepMaxPacket {
++		return "", fmt.Errorf("bad string")
++	}
++	b := make([]byte, n)
++	if _, err := io.ReadFull(r, b); err != nil {
++		return "", err
++	}
++
++	return string(b), nil
++}
++
++func (sl *sleeper) handle(conn net.Conn) {
++	sl.handleWith(conn, sl.wake)
++}
++
++// handleWith serves one connection; wake is called when a player tries to log in.
++func (sl *sleeper) handleWith(conn net.Conn, wake func()) {
++	defer conn.Close()
++	_ = conn.SetDeadline(time.Now().Add(sleepIOTimeout))
++	r := bufio.NewReader(conn)
++
++	id, p, err := readPacket(r)
++	if err != nil || id != 0x00 {
++		return
++	}
++	protocol, err := readVarInt(p)
++	if err != nil {
++		return
++	}
++	if _, err := readString(p); err != nil { // server address
++		return
++	}
++	if _, err := p.Seek(2, io.SeekCurrent); err != nil { // port
++		return
++	}
++	next, err := readVarInt(p)
++	if err != nil {
++		return
++	}
++
++	cfg := sl.s.sleepSettings()
++	switch next {
++	case 1: // server list
++		if id, _, err := readPacket(r); err != nil || id != 0x00 {
++			return
++		}
++		status, _ := json.Marshal(map[string]interface{}{
++			// The client's own protocol number, so the entry is shown as compatible.
++			"version":     map[string]interface{}{"name": "Sleeping", "protocol": protocol},
++			"players":     map[string]interface{}{"max": 0, "online": 0},
++			"description": map[string]string{"text": cfg.Motd},
++		})
++		var body bytes.Buffer
++		writeString(&body, string(status))
++		if err := writePacket(conn, 0x00, body.Bytes()); err != nil {
++			return
++		}
++		// The ping that measures the latency: answer with the same payload.
++		if id, pr, err := readPacket(r); err == nil && id == 0x01 {
++			payload := make([]byte, 8)
++			_, _ = io.ReadFull(pr, payload)
++			_ = writePacket(conn, 0x01, payload)
++		}
++	case 2, 3: // login (3: transfer, 1.20.5+)
++		// The login attempt itself is not needed; just read it so the client sees a clean answer.
++		_, _, _ = readPacket(r)
++		msg, _ := json.Marshal(map[string]string{"text": cfg.Starting})
++		var body bytes.Buffer
++		writeString(&body, string(msg))
++		_ = writePacket(conn, 0x00, body.Bytes()) // login disconnect
++		wake()
++	}
++}
++
++// minecraftPlayers asks a running Minecraft Java server how many players are on (server list ping).
++func minecraftPlayers(addr string) (int, error) {
++	host, portStr, err := net.SplitHostPort(addr)
++	if err != nil {
++		return 0, err
++	}
++	port, _ := strconv.Atoi(portStr)
++
++	conn, err := net.DialTimeout("tcp", addr, sleepIOTimeout)
++	if err != nil {
++		return 0, err
++	}
++	defer conn.Close()
++	_ = conn.SetDeadline(time.Now().Add(sleepIOTimeout))
++
++	var hs bytes.Buffer
++	writeVarInt(&hs, 765)
++	writeString(&hs, host)
++	_ = binary.Write(&hs, binary.BigEndian, uint16(port))
++	writeVarInt(&hs, 1)
++	if err := writePacket(conn, 0x00, hs.Bytes()); err != nil {
++		return 0, err
++	}
++	if err := writePacket(conn, 0x00, nil); err != nil {
++		return 0, err
++	}
++
++	r := bufio.NewReader(conn)
++	id, p, err := readPacket(r)
++	if err != nil {
++		return 0, err
++	}
++	if id != 0x00 {
++		return 0, fmt.Errorf("unexpected packet %d", id)
++	}
++	raw, err := readString(p)
++	if err != nil {
++		return 0, err
++	}
++	var status struct {
++		Players *struct {
++			Online int `json:"online"`
++		} `json:"players"`
++	}
++	if err := json.Unmarshal([]byte(raw), &status); err != nil || status.Players == nil {
++		return 0, fmt.Errorf("not a Minecraft status answer")
++	}
++
++	return status.Players.Online, nil
++}
++
++// sleepAddress is where a running server can be reached from Wings: its container's address and port.
++func (s *Server) sleepAddress() string {
++	port := s.Config().Allocations.DefaultMapping.Port
++	host := "127.0.0.1"
++	if cli, err := environment.Docker(); err == nil {
++		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
++		defer cancel()
++		if info, err := cli.ContainerInspect(ctx, s.ID()); err == nil && info.NetworkSettings != nil {
++			for _, n := range info.NetworkSettings.Networks {
++				if n.IPAddress != "" {
++					host = n.IPAddress
++					break
++				}
++			}
++		}
++	}
++
++	return net.JoinHostPort(host, strconv.Itoa(port))
++}
++
++// ---------------------------------------------------------------- the monitor
++
++// StartSleepMonitor checks all servers every 30 seconds: running ones with sleep mode on are stopped
++// after they have been empty long enough, sleeping ones get their stand-in listener (also after a
++// restart of Wings), and listeners of servers that were deleted or switched it off are removed.
++func StartSleepMonitor(ctx context.Context, m *Manager) {
++	go func() {
++		idleSince := map[string]time.Time{}
++		t := time.NewTicker(sleepTickInterval)
++		defer t.Stop()
++		for {
++			select {
++			case <-ctx.Done():
++				return
++			case <-t.C:
++				sleepTick(m, idleSince)
++			}
++		}
++	}()
++}
++
++func sleepTick(m *Manager, idleSince map[string]time.Time) {
++	defer func() {
++		if r := recover(); r != nil {
++			log.WithField("panic", r).Error("sleep monitor recovered from a panic")
++		}
++	}()
++
++	seen := map[string]bool{}
++	for _, s := range m.All() {
++		id := s.ID()
++		seen[id] = true
++		cfg := s.sleepSettings()
++
++		if !cfg.Enabled || s.IsSuspended() {
++			delete(idleSince, id)
++			sleepers.Lock()
++			armed := sleepers.m[id] != nil
++			sleepers.Unlock()
++			if armed || sleepMarked(id) {
++				s.sleepRelease()
++			}
++			continue
++		}
++
++		switch s.Environment.State() {
++		case environment.ProcessRunningState:
++			sleepIdleCheck(s, cfg, idleSince)
++		case environment.ProcessOfflineState:
++			delete(idleSince, id)
++			if sleepMarked(id) && !s.ExecutingPowerAction() {
++				if err := s.sleepArm(); err != nil {
++					s.Log().WithField("error", err).Warn("could not listen for players on the port of a sleeping server")
++				}
++			}
++		default:
++			delete(idleSince, id)
++		}
++	}
++
++	// Servers that no longer exist must not keep their port.
++	sleepers.Lock()
++	var gone []*sleeper
++	for id, sl := range sleepers.m {
++		if !seen[id] {
++			gone = append(gone, sl)
++			delete(sleepers.m, id)
++		}
++	}
++	sleepers.Unlock()
++	for _, sl := range gone {
++		_ = sl.ln.Close()
++		_ = os.Remove(sleepMarkerPath(sl.s.ID()))
++	}
++	for id := range idleSince {
++		if !seen[id] {
++			delete(idleSince, id)
++		}
++	}
++}
++
++func sleepIdleCheck(s *Server, cfg SleepConfiguration, idleSince map[string]time.Time) {
++	id := s.ID()
++	if s.IsInstalling() || s.IsTransferring() || s.IsRestoring() || s.ExecutingPowerAction() {
++		delete(idleSince, id)
++		return
++	}
++
++	// A server that does not answer the Minecraft server list (still starting, not Minecraft, hung)
++	// is never put to sleep: only a clear "0 players" counts.
++	online, err := minecraftPlayers(s.sleepAddress())
++	if err != nil || online > 0 {
++		delete(idleSince, id)
++		return
++	}
++
++	since, ok := idleSince[id]
++	if !ok {
++		idleSince[id] = time.Now()
++		return
++	}
++	if time.Since(since) < time.Duration(cfg.Minutes)*time.Minute {
++		return
++	}
++	delete(idleSince, id)
++
++	go func() {
++		s.PublishConsoleOutputFromDaemon(fmt.Sprintf("Nobody has been on the server for %d minutes, stopping it to save memory. A player who joins wakes it up again.", cfg.Minutes))
++		if err := s.HandlePowerAction(PowerActionStop); err != nil {
++			s.Log().WithField("error", err).Warn("failed to stop an empty server for sleep mode")
++			return
++		}
++		sleepMark(id)
++		if err := s.sleepArm(); err != nil {
++			s.Log().WithField("error", err).Warn("could not listen for players on the port of a sleeping server")
++		}
++	}()
++}

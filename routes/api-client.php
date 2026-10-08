@@ -228,5 +228,7 @@ Route::group([
         Route::post('/rename', [Client\Servers\SettingsController::class, 'rename']);
         Route::post('/reinstall', [Client\Servers\SettingsController::class, 'reinstall']);
         Route::put('/docker-image', [Client\Servers\SettingsController::class, 'dockerImage']);
+        Route::get('/sleep', [Client\Servers\SleepController::class, 'show']);
+        Route::put('/sleep', [Client\Servers\SleepController::class, 'update']);
     });
 });

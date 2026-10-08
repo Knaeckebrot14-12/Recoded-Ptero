@@ -3,6 +3,7 @@
 namespace Pterodactyl\Http\Requests\Admin\Settings;
 
 use Pterodactyl\Http\Requests\Admin\AdminFormRequest;
+use Pterodactyl\Services\Servers\SleepSettingsService;
 
 class AdvancedSettingsFormRequest extends AdminFormRequest
 {
@@ -32,6 +33,8 @@ class AdvancedSettingsFormRequest extends AdminFormRequest
                 'gt:pterodactyl:client_features:allocations:range_start',
             ],
             'mcpanel:phpmyadmin:enabled' => 'required|in:true,false',
+            'mcpanel:sleep:enabled' => 'required|in:true,false',
+            'mcpanel:sleep:minutes' => 'required|integer|in:' . implode(',', SleepSettingsService::MINUTES),
         ];
     }
 
@@ -47,6 +50,8 @@ class AdvancedSettingsFormRequest extends AdminFormRequest
             'pterodactyl:client_features:allocations:range_start' => 'Starting Port',
             'pterodactyl:client_features:allocations:range_end' => 'Ending Port',
             'mcpanel:phpmyadmin:enabled' => 'phpMyAdmin',
+            'mcpanel:sleep:enabled' => 'Sleep mode',
+            'mcpanel:sleep:minutes' => 'Sleep mode idle time',
         ];
     }
 }
