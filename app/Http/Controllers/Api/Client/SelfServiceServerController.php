@@ -13,6 +13,7 @@ use Pterodactyl\Exceptions\DisplayException;
 use Pterodactyl\Services\Coins\CoinService;
 use Pterodactyl\Services\Servers\ServerCreationService;
 use Pterodactyl\Services\Servers\ServerDeletionService;
+use Pterodactyl\Services\Nodes\NodePlacementService;
 use Pterodactyl\Services\Deployment\AllocationSelectionService;
 use Pterodactyl\Http\Requests\Api\Client\SelfServiceServerRequest;
 
@@ -27,6 +28,7 @@ class SelfServiceServerController extends ClientApiController
         private ServerDeletionService $deletionService,
         private AllocationSelectionService $allocationSelectionService,
         private CoinService $coins,
+        private NodePlacementService $placement,
     ) {
         parent::__construct();
     }
@@ -172,8 +174,15 @@ class SelfServiceServerController extends ClientApiController
         $this->assertWithinPool($poolCounted, 'cpu', $cpu, $user->server_cpu_limit, trans('coins.errors.unit_cpu'));
         $this->assertWithinPool($poolCounted, 'backup_limit', $backupLimit, $user->server_backup_limit, trans('coins.errors.unit_backups'));
 
-        /** @var Node $node */
-        $node = Node::query()->where('public', true)->findOrFail($request->input('node_id'));
+        $placement = null;
+        if ($request->filled('node_id')) {
+            /** @var Node $node */
+            $node = Node::query()->where('public', true)->findOrFail($request->input('node_id'));
+        } else {
+            // "Automatic": the panel picks the best node and one of its existing free allocations.
+            $placement = $this->placement->findOrFail($memory, $disk, $cpu);
+            $node = $placement['node'];
+        }
 
         $usedNodeMemory = (int) Server::query()->where('node_id', $node->id)->sum('memory');
         $usedNodeDisk = (int) Server::query()->where('node_id', $node->id)->sum('disk');
@@ -197,7 +206,7 @@ class SelfServiceServerController extends ClientApiController
         $egg = Egg::query()->with('variables')->findOrFail($request->input('egg_id'));
         $environment = $egg->variables->pluck('default_value', 'env_variable')->toArray();
 
-        $allocation = $this->allocationSelectionService
+        $allocation = $placement['allocation'] ?? $this->allocationSelectionService
             ->setDedicated(false)
             ->setNodes([$node->id])
             ->setPorts([])

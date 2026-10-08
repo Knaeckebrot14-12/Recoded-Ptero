@@ -58,6 +58,8 @@ return [
         'maintenance.updated' => 'Set maintenance mode to :subject',
         'user.email_verified' => 'Confirmed the e-mail address of :subject',
         'nodes.wings_update' => 'Updated Wings on node :subject to :version',
+        'nodes.drain_started' => 'Started moving all :count server(s) away from node :subject (maintenance mode on)',
+        'nodes.drain_cancelled' => 'Cancelled moving the servers away from node :subject',
         'settings.monitoring' => 'Changed the monitoring settings',
         'settings.abuse' => 'Changed the abuse detection settings',
         'abuse.resolved' => 'Resolved the abuse flag (:type) of server :subject',

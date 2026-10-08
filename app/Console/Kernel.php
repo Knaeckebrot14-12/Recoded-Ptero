@@ -54,6 +54,8 @@ class Kernel extends ConsoleKernel
         // Idempotent; also repairs database hosts that were offline when the update ran.
         $schedule->command('p:databases:fix-grants')->dailyAt('04:10')->withoutOverlapping();
         $schedule->command(MonitorNodesCommand::class)->everyMinute()->withoutOverlapping()->runInBackground();
+        // "Move all servers away" (admin node page): checks running moves and starts the next ones.
+        $schedule->command('p:nodes:drain')->everyMinute()->withoutOverlapping();
         $schedule->command(AutoBackupCommand::class)->everyFiveMinutes()->withoutOverlapping();
         $schedule->command(RenewCertificateCommand::class)->twiceDaily(3, 15)->withoutOverlapping();
 

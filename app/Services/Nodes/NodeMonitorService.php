@@ -16,7 +16,7 @@ use Pterodactyl\Exceptions\Http\Connection\DaemonConnectionException;
 class NodeMonitorService
 {
     /** Failed checks in a row before a node counts as offline (one check per minute). */
-    private const OFFLINE_AFTER_FAILURES = 2;
+    public const OFFLINE_AFTER_FAILURES = 2;
 
     /** An alert clears once the value is this many percent below its threshold again. */
     private const HYSTERESIS = 5;

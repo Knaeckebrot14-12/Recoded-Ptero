@@ -40,6 +40,7 @@ return [
         'name_placeholder' => 'Il mio server',
         'egg_label' => 'Egg',
         'node_label' => 'Node',
+        'node_auto' => 'Automatico (nodo migliore)',
         'node_servers_one' => ':count server',
         'node_servers_other' => ':count server',
         'memory_label' => 'Memoria (MiB)',

@@ -142,7 +142,6 @@ export default () => {
     const slotsRemaining = Math.max(0, options.limits.slots - options.used.slots);
     const onCooldown = options.cooldownSecondsRemaining > 0;
     const firstEgg = options.nests.find((n) => n.eggs.length > 0)?.eggs[0];
-    const firstNode = options.nodes[0];
 
     const onSubmit = (values: Values, { setSubmitting }: FormikHelpers<Values>) => {
         clearFlashes('create-server');
@@ -151,7 +150,7 @@ export default () => {
         createSelfServiceServer({
             name: values.name,
             eggId: Number(values.eggId),
-            nodeId: Number(values.nodeId),
+            nodeId: values.nodeId === 'auto' ? null : Number(values.nodeId),
             memory: values.memory,
             disk: values.disk,
             cpu: values.cpu,
@@ -263,7 +262,7 @@ export default () => {
                             initialValues={{
                                 name: '',
                                 eggId: firstEgg ? String(firstEgg.id) : '',
-                                nodeId: firstNode ? String(firstNode.id) : '',
+                                nodeId: 'auto',
                                 memory: Math.min(2048, remaining.memory),
                                 disk: Math.min(5120, remaining.disk),
                                 cpu: Math.min(100, remaining.cpu),
@@ -323,6 +322,7 @@ export default () => {
                                                     {t('server_details.node_label')}
                                                 </label>
                                                 <FormikNativeSelect name={'nodeId'} disabled={isSubmitting || complete}>
+                                                    <option value={'auto'}>{t('server_details.node_auto')}</option>
                                                     {options.nodes.map((node) => (
                                                         <option key={node.id} value={node.id}>
                                                             {node.name} (

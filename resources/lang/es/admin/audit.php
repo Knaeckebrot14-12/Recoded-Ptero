@@ -58,6 +58,8 @@ return [
         'maintenance.updated' => 'Puso el modo mantenimiento en :subject',
         'user.email_verified' => 'Confirmó la dirección de correo de :subject',
         'nodes.wings_update' => 'Actualizó Wings en el node :subject a :version',
+        'nodes.drain_started' => 'Inició el traslado de los :count servidor(es) del node :subject (modo mantenimiento activado)',
+        'nodes.drain_cancelled' => 'Canceló el traslado de los servidores del node :subject',
         'settings.monitoring' => 'Cambió los ajustes de monitorización',
         'settings.abuse' => 'Cambió los ajustes de detección de abuso',
         'abuse.resolved' => 'Resolvió el aviso de abuso (:type) del servidor :subject',

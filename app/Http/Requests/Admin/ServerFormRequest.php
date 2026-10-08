@@ -17,6 +17,15 @@ class ServerFormRequest extends AdminFormRequest
         $rules['description'][] = 'nullable';
         $rules['custom_image'] = 'sometimes|nullable|string';
 
+        // "Automatic (best node)": the panel picks the node and one of its existing free allocations,
+        // optionally limited like the API's deploy block.
+        if ($this->boolean('auto_deploy')) {
+            unset($rules['node_id'], $rules['allocation_id']);
+            $rules['deploy.locations'] = 'sometimes|array';
+            $rules['deploy.locations.*'] = 'nullable|integer|exists:locations,id';
+            $rules['deploy.port_range'] = 'nullable|string|max:191';
+        }
+
         return $rules;
     }
 

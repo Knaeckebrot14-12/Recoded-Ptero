@@ -52,6 +52,7 @@ return [
     'deployment' => [
         'no_viable_nodes' => 'Nenhum nó que satisfaça os requisitos especificados para a implantação automática foi encontrado.',
         'no_viable_allocations' => 'Nenhuma alocação que satisfaça os requisitos da implantação automática foi encontrada.',
+        'no_placement' => 'Nenhum nó pode receber este servidor neste momento (memória e disco livres suficientes, uma porta livre, online e fora de manutenção). Nada foi criado.',
     ],
     'api' => [
         'resource_not_found' => 'O recurso solicitado não existe neste servidor.',
