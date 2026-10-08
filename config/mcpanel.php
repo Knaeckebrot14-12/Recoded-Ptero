@@ -17,7 +17,7 @@ return [
     'updater_dir' => env('MC_UPDATER_DIR', '/app/updater'),
 
     // Version of the Wings build the installer installs (GitHub release "wings-v<version>" of this repository).
-    'wings_version' => env('MC_PANEL_WINGS_VERSION', '1.1.0'),
+    'wings_version' => env('MC_PANEL_WINGS_VERSION', '1.2.0'),
 
     // Admin -> Settings -> Login & Registration.
     'registration' => [
@@ -130,6 +130,11 @@ return [
 
     // Sleep mode: Wings stops a server nobody was on for "minutes" and starts it again when a player
     // connects. The default for servers that didn't choose; set under Admin -> Settings -> Advanced.
+    // File manager trash: deleted files can be restored for this many hours.
+    'trash' => [
+        'hours' => env('MC_PANEL_TRASH_HOURS', 24),
+    ],
+
     'sleep' => [
         'enabled' => env('MC_PANEL_SLEEP', false),
         'minutes' => env('MC_PANEL_SLEEP_MINUTES', 30),

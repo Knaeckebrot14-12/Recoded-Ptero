@@ -92,6 +92,11 @@ return [
             'write' => 'Gravou novo conteúdo em :file',
             'upload' => 'Iniciou o envio de um arquivo',
             'uploaded' => 'Enviou :directory:file',
+            'restore_one' => ':files.0 restaurado da reciclagem',
+            'restore_other' => ':count ficheiros restaurados da reciclagem',
+            'trash' => [
+                'purge' => ':count itens eliminados definitivamente da reciclagem',
+            ],
         ],
         'sftp' => [
             'denied' => 'Acesso SFTP bloqueado por falta de permissões',
@@ -148,6 +153,10 @@ return [
             'kick' => ':target expulso',
             'whitelist_on' => 'Whitelist ativada',
             'whitelist_off' => 'Whitelist desativada',
+        ],
+        'clone' => 'Todos os ficheiros copiados de :source para :target',
+        'sleep' => [
+            'update' => 'Definições do modo de suspensão alteradas',
         ],
         'crashed' => 'O servidor travou',
         'software' => [

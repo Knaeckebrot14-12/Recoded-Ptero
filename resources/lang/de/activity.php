@@ -98,6 +98,11 @@ return [
             'write' => 'Neuen Inhalt in :file geschrieben',
             'upload' => 'Datei-Upload gestartet',
             'uploaded' => ':directory:file hochgeladen',
+            'restore_one' => ':files.0 aus dem Papierkorb wiederhergestellt',
+            'restore_other' => ':count Dateien aus dem Papierkorb wiederhergestellt',
+            'trash' => [
+                'purge' => ':count Einträge endgültig aus dem Papierkorb gelöscht',
+            ],
         ],
         'sftp' => [
             'denied' => 'SFTP-Zugriff aufgrund fehlender Berechtigungen blockiert',
@@ -154,6 +159,10 @@ return [
             'kick' => ':target gekickt',
             'whitelist_on' => 'Whitelist eingeschaltet',
             'whitelist_off' => 'Whitelist ausgeschaltet',
+        ],
+        'clone' => 'Alle Dateien von :source nach :target kopiert',
+        'sleep' => [
+            'update' => 'Einstellungen des Schlafmodus geändert',
         ],
         'crashed' => 'Der Server ist abgestürzt',
         'software' => [

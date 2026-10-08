@@ -13,7 +13,7 @@ index c288539..7cc3a27 100644
  	// on Wings. This allows us to ensure the environment exists, write configurations,
  	// and reboot processes without causing a slow-down due to sequential booting.
 diff --git a/router/router.go b/router/router.go
-index bdac760..3abb2d2 100644
+index bdac760..171fdf5 100644
 --- a/router/router.go
 +++ b/router/router.go
 @@ -63,6 +63,8 @@ func Configure(m *wserver.Manager, client remote.Client) *gin.Engine {
@@ -25,6 +25,16 @@ index bdac760..3abb2d2 100644
  	protected.GET("/api/servers", getAllServers)
  	protected.POST("/api/servers", postCreateServer)
  	protected.DELETE("/api/transfers/:server", deleteTransfer)
+@@ -83,6 +85,9 @@ func Configure(m *wserver.Manager, client remote.Client) *gin.Engine {
+ 		server.POST("/reinstall", postServerReinstall)
+ 		server.POST("/sync", postServerSync)
+ 		server.POST("/ws/deny", postServerDenyWSTokens)
++		// Recoded Ptero: copy the files of another server on this node into this one.
++		server.POST("/recoded/clone", postServerRecodedClone)
++		server.GET("/recoded/clone", getServerRecodedClone)
+ 
+ 		// This archive request causes the archive to start being created
+ 		// this should only be triggered by the panel.
 diff --git a/router/router_recoded.go b/router/router_recoded.go
 new file mode 100644
 index 0000000..6090408
@@ -270,6 +280,343 @@ index 0000000..6090408
 +		p *= 10
 +	}
 +	return float64(int64(v*p+0.5)) / p
++}
+diff --git a/router/router_recoded_clone.go b/router/router_recoded_clone.go
+new file mode 100644
+index 0000000..ec409b5
+--- /dev/null
++++ b/router/router_recoded_clone.go
+@@ -0,0 +1,55 @@
++package router
++
++// Recoded Ptero: copy all files of another server on this node into a server (see server/clone_recoded.go).
++
++import (
++	"errors"
++	"net/http"
++
++	"github.com/gin-gonic/gin"
++
++	"github.com/pterodactyl/wings/router/middleware"
++	"github.com/pterodactyl/wings/server"
++)
++
++// postServerRecodedClone starts copying the files of "source" into the server in the URL.
++// The answer comes right away; the progress is read with getServerRecodedClone.
++func postServerRecodedClone(c *gin.Context) {
++	target := ExtractServer(c)
++
++	var data struct {
++		Source string `json:"source" binding:"required"`
++		Batch  string `json:"batch" binding:"required"`
++	}
++	if err := c.BindJSON(&data); err != nil {
++		return
++	}
++
++	source, ok := middleware.ExtractManager(c).Get(data.Source)
++	if !ok {
++		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "The source server is not on this node."})
++		return
++	}
++
++	if err := server.StartClone(target, source, data.Batch); err != nil {
++		var conflict *server.ErrCloneConflict
++		if errors.As(err, &conflict) {
++			c.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": conflict.Reason})
++			return
++		}
++		middleware.CaptureAndAbort(c, err)
++		return
++	}
++
++	c.JSON(http.StatusAccepted, server.CloneStatusOf(target.ID()))
++}
++
++// getServerRecodedClone returns the status of the last copy into the server (404 when there was none).
++func getServerRecodedClone(c *gin.Context) {
++	st := server.CloneStatusOf(ExtractServer(c).ID())
++	if st == nil {
++		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "No copy was started for this server."})
++		return
++	}
++	c.JSON(http.StatusOK, st)
++}
+diff --git a/server/backup.go b/server/backup.go
+index 1568290..99d05ad 100644
+--- a/server/backup.go
++++ b/server/backup.go
+@@ -67,6 +67,9 @@ func (s *Server) Backup(b backup.BackupInterface) error {
+ 		}
+ 	}
+ 
++	// Recoded Ptero: the panel's trash folder (deleted files kept for a while) is never backed up.
++	ignored += "\n/" + TrashDirectory + "\n"
++
+ 	ad, err := b.Generate(s.Context(), s.Filesystem(), ignored)
+ 	if err != nil {
+ 		if err := s.notifyPanelOfBackup(b.Identifier(), &backup.ArchiveDetails{}, false); err != nil {
+diff --git a/server/clone_recoded.go b/server/clone_recoded.go
+new file mode 100644
+index 0000000..256709f
+--- /dev/null
++++ b/server/clone_recoded.go
+@@ -0,0 +1,256 @@
++package server
++
++// Recoded Ptero: copies all files of one server into another server on the same node ("clone").
++// The target's current files are moved into its trash folder (.trash/<batch>, which the panel
++// can restore for a while) when there is room for both, otherwise they are deleted. Both servers
++// must be stopped; their power actions are locked while the copy runs. Every file is read and
++// written through the servers' own filesystems, so symlinks can't lead outside their directories.
++
++import (
++	"fmt"
++	"path"
++	"regexp"
++	"sync"
++	"time"
++
++	"emperror.dev/errors"
++
++	"github.com/pterodactyl/wings/environment"
++)
++
++// TrashDirectory is the folder inside a server where the panel keeps deleted files for a while.
++const TrashDirectory = ".trash"
++
++var cloneBatchPattern = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
++
++// CloneStatus is the state of the last copy into a server.
++type CloneStatus struct {
++	State      string    `json:"state"` // running, done or failed
++	Error      string    `json:"error,omitempty"`
++	Source     string    `json:"source"`
++	Batch      string    `json:"batch"`
++	Trashed    bool      `json:"trashed"`
++	Files      int64     `json:"files"`
++	Bytes      int64     `json:"bytes"`
++	StartedAt  time.Time `json:"started_at"`
++	FinishedAt time.Time `json:"finished_at,omitempty"`
++}
++
++var clones = struct {
++	sync.Mutex
++	m map[string]*CloneStatus
++}{m: map[string]*CloneStatus{}}
++
++// CloneStatusOf returns a copy of the status of the last copy into the server, or nil.
++func CloneStatusOf(id string) *CloneStatus {
++	clones.Lock()
++	defer clones.Unlock()
++	if st, ok := clones.m[id]; ok {
++		c := *st
++		return &c
++	}
++	return nil
++}
++
++func setCloneStatus(id string, fn func(st *CloneStatus)) {
++	clones.Lock()
++	defer clones.Unlock()
++	if st, ok := clones.m[id]; ok {
++		fn(st)
++	}
++}
++
++// ErrCloneConflict is returned when a server can't take part in a copy right now.
++type ErrCloneConflict struct{ Reason string }
++
++func (e *ErrCloneConflict) Error() string { return e.Reason }
++
++func cloneReady(s *Server, role string) error {
++	if s.Environment.State() != environment.ProcessOfflineState {
++		return &ErrCloneConflict{Reason: fmt.Sprintf("the %s server must be stopped first", role)}
++	}
++	if s.IsInstalling() || s.IsTransferring() || s.IsRestoring() || s.ExecutingPowerAction() {
++		return &ErrCloneConflict{Reason: fmt.Sprintf("the %s server is busy (installing, moving or restoring)", role)}
++	}
++	return nil
++}
++
++// StartClone checks both servers and starts copying source into target in the background.
++func StartClone(target, source *Server, batch string) error {
++	if target.ID() == source.ID() {
++		return &ErrCloneConflict{Reason: "a server can't be copied into itself"}
++	}
++	if !cloneBatchPattern.MatchString(batch) {
++		return &ErrCloneConflict{Reason: "invalid trash folder name"}
++	}
++	if err := cloneReady(target, "target"); err != nil {
++		return err
++	}
++	if err := cloneReady(source, "source"); err != nil {
++		return err
++	}
++
++	clones.Lock()
++	if st, ok := clones.m[target.ID()]; ok && st.State == "running" {
++		clones.Unlock()
++		return &ErrCloneConflict{Reason: "a copy into this server is already running"}
++	}
++	for _, st := range clones.m {
++		if st.State == "running" && st.Source == target.ID() {
++			clones.Unlock()
++			return &ErrCloneConflict{Reason: "this server is being copied right now"}
++		}
++	}
++	clones.m[target.ID()] = &CloneStatus{State: "running", Source: source.ID(), Batch: batch, StartedAt: time.Now()}
++	clones.Unlock()
++
++	// Nothing may start either server while the files move; the locks are held until the copy ends.
++	if err := target.powerLock.Acquire(); err != nil {
++		setCloneStatus(target.ID(), func(st *CloneStatus) {
++			st.State, st.Error, st.FinishedAt = "failed", "the target server is busy", time.Now()
++		})
++		return &ErrCloneConflict{Reason: "the target server is busy"}
++	}
++	if err := source.powerLock.Acquire(); err != nil {
++		target.powerLock.Release()
++		setCloneStatus(target.ID(), func(st *CloneStatus) {
++			st.State, st.Error, st.FinishedAt = "failed", "the source server is busy", time.Now()
++		})
++		return &ErrCloneConflict{Reason: "the source server is busy"}
++	}
++
++	go func() {
++		defer target.powerLock.Release()
++		defer source.powerLock.Release()
++
++		err := runClone(target, source, batch)
++		setCloneStatus(target.ID(), func(st *CloneStatus) {
++			st.FinishedAt = time.Now()
++			if err != nil {
++				st.State, st.Error = "failed", err.Error()
++			} else {
++				st.State = "done"
++			}
++		})
++		if err != nil {
++			target.Log().WithField("error", err).Warn("copying files from another server failed")
++			target.PublishConsoleOutputFromDaemon("Copying the files failed: " + err.Error())
++		} else {
++			target.PublishConsoleOutputFromDaemon("The files were copied. The server can be started now.")
++		}
++	}()
++
++	return nil
++}
++
++func runClone(target, source *Server, batch string) error {
++	tfs, sfs := target.Filesystem(), source.Filesystem()
++	target.PublishConsoleOutputFromDaemon(fmt.Sprintf("Copying all files from the server \"%s\" into this one...", source.Config().Meta.Name))
++
++	// How much is copied (the source's trash stays where it is).
++	var size int64
++	entries, err := sfs.ReadDirStat("/")
++	if err != nil {
++		return errors.Wrap(err, "could not read the source server")
++	}
++	for _, e := range entries {
++		if e.Name() == TrashDirectory {
++			continue
++		}
++		if e.IsDir() {
++			n, err := sfs.DirectorySize(e.Name())
++			if err != nil {
++				return errors.Wrap(err, "could not measure the source server")
++			}
++			size += n
++		} else if e.Mode().IsRegular() {
++			size += e.Size()
++		}
++	}
++	limit := tfs.MaxDisk()
++	if limit > 0 && size > limit {
++		return fmt.Errorf("the files of the source server (%d MiB) don't fit into the target server's disk limit (%d MiB)", size>>20, limit>>20)
++	}
++	// Measured directly: the cached value is 0 when the disk check is turned off in the configuration.
++	used, err := tfs.DirectorySize("/")
++	if err != nil {
++		return errors.Wrap(err, "could not measure the target server")
++	}
++
++	// Make room: the current files go into the trash when both fit, otherwise they are deleted.
++	trash := limit <= 0 || used+size <= limit
++	if !trash {
++		// The trash stays, so the copy has to fit next to it.
++		if kept, err := tfs.DirectorySize(TrashDirectory); err == nil && kept+size > limit {
++			return fmt.Errorf("the files of the source server don't fit next to the target server's trash; empty its trash first")
++		}
++	}
++	setCloneStatus(target.ID(), func(st *CloneStatus) { st.Trashed = trash })
++	current, err := tfs.ReadDirStat("/")
++	if err != nil {
++		return errors.Wrap(err, "could not read the target server")
++	}
++	for _, e := range current {
++		if e.Name() == TrashDirectory {
++			continue
++		}
++		if trash {
++			err = tfs.Rename(e.Name(), path.Join(TrashDirectory, batch, e.Name()))
++		} else {
++			err = tfs.Delete(e.Name())
++		}
++		if err != nil {
++			return errors.Wrapf(err, "could not clear %s on the target server", e.Name())
++		}
++	}
++	if !trash {
++		// The deleted files no longer count against the limit.
++		tfs.HasSpaceAvailable(false)
++	}
++
++	var files, bytes int64
++	var walk func(dir string) error
++	walk = func(dir string) error {
++		list, err := sfs.ReadDirStat(dir)
++		if err != nil {
++			return errors.Wrapf(err, "could not read %s", dir)
++		}
++		for _, e := range list {
++			p := path.Join(dir, e.Name())
++			if dir == "/" && e.Name() == TrashDirectory {
++				continue
++			}
++			switch {
++			case e.IsDir():
++				if err := tfs.CreateDirectory(e.Name(), dir); err != nil {
++					return errors.Wrapf(err, "could not create %s", p)
++				}
++				if err := walk(p); err != nil {
++					return err
++				}
++			case e.Mode().IsRegular():
++				f, st, err := sfs.File(p)
++				if err != nil {
++					return errors.Wrapf(err, "could not open %s", p)
++				}
++				err = tfs.Write(p, f, st.Size(), st.Mode().Perm())
++				_ = f.Close()
++				if err != nil {
++					return errors.Wrapf(err, "could not write %s", p)
++				}
++				files++
++				bytes += st.Size()
++				if files%200 == 0 {
++					setCloneStatus(target.ID(), func(st *CloneStatus) { st.Files, st.Bytes = files, bytes })
++				}
++			}
++			// Symlinks, sockets and the like are not copied.
++		}
++		return nil
++	}
++	err = walk("/")
++	setCloneStatus(target.ID(), func(st *CloneStatus) { st.Files, st.Bytes = files, bytes })
++	tfs.HasSpaceAvailable(false)
++
++	return err
 +}
 diff --git a/server/configuration.go b/server/configuration.go
 index 387aba8..b08a1c5 100644

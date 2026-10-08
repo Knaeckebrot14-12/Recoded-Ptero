@@ -33,6 +33,9 @@ import decompressFiles from '@/api/server/files/decompressFiles';
 import isEqual from 'react-fast-compare';
 import ChmodFileModal from '@/components/server/files/ChmodFileModal';
 import { Dialog } from '@/components/elements/dialog';
+import { mutate as mutateGlobal } from 'swr';
+import { getTrashSwrKey } from '@/plugins/useTrashSwr';
+import DeleteTrashOption, { WithTrashHours } from '@/components/server/files/DeleteTrashOption';
 
 type ModalType = 'rename' | 'move' | 'chmod';
 
@@ -61,6 +64,7 @@ const FileDropdownMenu = ({ file }: { file: FileObject }) => {
     const [showSpinner, setShowSpinner] = useState(false);
     const [modal, setModal] = useState<ModalType | null>(null);
     const [showConfirmation, setShowConfirmation] = useState(false);
+    const [permanent, setPermanent] = useState(false);
 
     const uuid = ServerContext.useStoreState((state) => state.server.data!.uuid);
     const { mutate } = useFileManagerSwr();
@@ -80,10 +84,12 @@ const FileDropdownMenu = ({ file }: { file: FileObject }) => {
         // If the delete actually fails, we'll fetch the current directory contents again automatically.
         mutate((files) => files.filter((f) => f.key !== file.key), false);
 
-        deleteFiles(uuid, directory, [file.name]).catch((error) => {
-            mutate();
-            clearAndAddHttpError({ key: 'files', error });
-        });
+        deleteFiles(uuid, directory, [file.name], permanent)
+            .then(() => mutateGlobal(getTrashSwrKey(uuid)))
+            .catch((error) => {
+                mutate();
+                clearAndAddHttpError({ key: 'files', error });
+            });
     };
 
     const doCopy = () => {
@@ -138,9 +144,19 @@ const FileDropdownMenu = ({ file }: { file: FileObject }) => {
                 confirm={t('dropdown.delete_confirm')}
                 onConfirmed={doDeletion}
             >
-                {t('dropdown.delete_body')}
-                <span className={'font-semibold text-gray-50'}>{file.name}</span>
-                {t('dropdown.delete_body_suffix')}
+                {permanent ? (
+                    <>
+                        {t('mass_actions.delete_body')}
+                        <span className={'font-semibold text-gray-50'}>{file.name}</span>?
+                    </>
+                ) : (
+                    <>
+                        {t('dropdown.delete_body')}
+                        <span className={'font-semibold text-gray-50'}>{file.name}</span>
+                        <WithTrashHours>{(hours) => t('dropdown.delete_body_suffix', { hours })}</WithTrashHours>
+                    </>
+                )}
+                <DeleteTrashOption checked={permanent} onChange={setPermanent} />
             </Dialog.Confirm>
             <DropdownMenu
                 ref={onClickRef}
@@ -191,7 +207,10 @@ const FileDropdownMenu = ({ file }: { file: FileObject }) => {
                 {file.isFile && <Row onClick={doDownload} icon={faFileDownload} title={t('dropdown.download')} />}
                 <Can action={'file.delete'}>
                     <Row
-                        onClick={() => setShowConfirmation(true)}
+                        onClick={() => {
+                            setPermanent(false);
+                            setShowConfirmation(true);
+                        }}
                         icon={faTrashAlt}
                         title={t('dropdown.delete')}
                         $danger

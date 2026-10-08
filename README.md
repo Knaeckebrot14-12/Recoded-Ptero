@@ -147,6 +147,11 @@ Under **Admin → Nodes** each node shows its usage; when a newer Wings release 
 
 Alerts are configured under **Admin → Settings → Monitoring** (Discord webhook, disk and memory thresholds). The same Discord channel can also get a message for every new support ticket and new registration.
 
+## Trash and copying servers
+
+- **Trash:** files and folders deleted in the file manager go into the server's trash (the hidden `.trash` folder) and can be restored for 24 hours (`MC_PANEL_TRASH_HOURS`) with the **Trash** button. After that they are deleted for good; "Delete for good right away" in the delete dialog skips the trash and frees the disk space at once. The trash counts towards the server's disk space and is never included in backups. Files deleted over SFTP or by the game server itself are not covered.
+- **Copy this server** (Settings): copies all files of a server into another server of the same type (egg) on the same node. It only appears when the person has at least two servers of that type. No server, port or allocation is created. Both servers must be stopped; the target's previous files go into its trash when there is room (restoring that entry undoes the copy), otherwise they are deleted. Needs Wings 1.2.0 or newer on the node.
+
 ## Sleep mode
 
 A Minecraft Java server nobody has been on for a while is stopped to free its memory, and wakes up when a player connects. Servers switch it on under **Settings → Sleep when empty** (idle time 10 minutes to 4 hours); the panel-wide default for servers that did not choose is under **Admin → Settings → Advanced** (off by default, 30 minutes) and applies from the server's next start.

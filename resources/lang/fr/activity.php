@@ -98,6 +98,11 @@ return [
             'write' => 'Nouveau contenu écrit dans :file',
             'upload' => 'Début d\'un envoi de fichier',
             'uploaded' => ':directory:file envoyé',
+            'restore_one' => ':files.0 restauré depuis la corbeille',
+            'restore_other' => ':count fichiers restaurés depuis la corbeille',
+            'trash' => [
+                'purge' => ':count éléments supprimés définitivement de la corbeille',
+            ],
         ],
         'sftp' => [
             'denied' => 'Accès SFTP bloqué en raison des permissions',
@@ -154,6 +159,10 @@ return [
             'kick' => ':target expulsé',
             'whitelist_on' => 'Liste blanche activée',
             'whitelist_off' => 'Liste blanche désactivée',
+        ],
+        'clone' => 'Tous les fichiers de :source copiés vers :target',
+        'sleep' => [
+            'update' => 'Paramètres du mode veille modifiés',
         ],
         'crashed' => 'Le serveur a planté',
         'software' => [

@@ -12,6 +12,9 @@ import deleteFiles from '@/api/server/files/deleteFiles';
 import RenameFileModal from '@/components/server/files/RenameFileModal';
 import Portal from '@/components/elements/Portal';
 import { Dialog } from '@/components/elements/dialog';
+import { mutate as mutateGlobal } from 'swr';
+import { getTrashSwrKey } from '@/plugins/useTrashSwr';
+import DeleteTrashOption, { WithTrashHours } from '@/components/server/files/DeleteTrashOption';
 
 const MassActionsBar = () => {
     const { t } = useTranslation('server_files');
@@ -23,6 +26,7 @@ const MassActionsBar = () => {
     const [loadingMessage, setLoadingMessage] = useState('');
     const [showConfirm, setShowConfirm] = useState(false);
     const [showMove, setShowMove] = useState(false);
+    const [permanent, setPermanent] = useState(false);
     const directory = ServerContext.useStoreState((state) => state.files.directory);
 
     const selectedFiles = ServerContext.useStoreState((state) => state.files.selectedFiles);
@@ -50,8 +54,9 @@ const MassActionsBar = () => {
         clearFlashes('files');
         setLoadingMessage(t('mass_actions.deleting'));
 
-        deleteFiles(uuid, directory, selectedFiles)
+        deleteFiles(uuid, directory, selectedFiles, permanent)
             .then(() => {
+                mutateGlobal(getTrashSwrKey(uuid));
                 mutate((files) => files.filter((f) => selectedFiles.indexOf(f.name) < 0), false);
                 setSelectedFiles([]);
             })
@@ -80,7 +85,13 @@ const MassActionsBar = () => {
                         <span className={'font-semibold text-gray-50'}>
                             {t('mass_actions.files_count', { count: selectedFiles.length })}
                         </span>
-                        {t('mass_actions.delete_body_suffix')}
+                        {permanent ? (
+                            '?'
+                        ) : (
+                            <WithTrashHours>
+                                {(hours) => t('mass_actions.delete_body_suffix', { hours })}
+                            </WithTrashHours>
+                        )}
                     </p>
                     {selectedFiles.slice(0, 15).map((file) => (
                         <li key={file}>{file}</li>
@@ -88,6 +99,7 @@ const MassActionsBar = () => {
                     {selectedFiles.length > 15 && (
                         <li>{t('mass_actions.and_others', { count: selectedFiles.length - 15 })}</li>
                     )}
+                    <DeleteTrashOption checked={permanent} onChange={setPermanent} />
                 </Dialog.Confirm>
                 {showMove && (
                     <RenameFileModal
@@ -104,7 +116,13 @@ const MassActionsBar = () => {
                             <div css={tw`flex items-center space-x-4 pointer-events-auto rounded p-4 bg-black/50`}>
                                 <Button onClick={() => setShowMove(true)}>{t('mass_actions.move')}</Button>
                                 <Button onClick={onClickCompress}>{t('mass_actions.archive')}</Button>
-                                <Button.Danger variant={Button.Variants.Secondary} onClick={() => setShowConfirm(true)}>
+                                <Button.Danger
+                                    variant={Button.Variants.Secondary}
+                                    onClick={() => {
+                                        setPermanent(false);
+                                        setShowConfirm(true);
+                                    }}
+                                >
                                     {t('mass_actions.delete')}
                                 </Button.Danger>
                             </div>

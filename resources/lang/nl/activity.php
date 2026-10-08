@@ -92,6 +92,11 @@ return [
             'write' => 'Nieuwe inhoud geschreven naar :file',
             'upload' => 'Bestandsupload gestart',
             'uploaded' => ':directory:file geüpload',
+            'restore_one' => ':files.0 teruggezet uit de prullenbak',
+            'restore_other' => ':count bestanden teruggezet uit de prullenbak',
+            'trash' => [
+                'purge' => ':count items definitief uit de prullenbak verwijderd',
+            ],
         ],
         'sftp' => [
             'denied' => 'SFTP-toegang geblokkeerd wegens rechten',
@@ -148,6 +153,10 @@ return [
             'kick' => ':target gekickt',
             'whitelist_on' => 'Whitelist ingeschakeld',
             'whitelist_off' => 'Whitelist uitgeschakeld',
+        ],
+        'clone' => 'Alle bestanden van :source naar :target gekopieerd',
+        'sleep' => [
+            'update' => 'Instellingen van de slaapstand gewijzigd',
         ],
         'crashed' => 'De server is gecrasht',
         'software' => [

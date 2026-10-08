@@ -98,6 +98,11 @@ return [
             'write' => 'Wrote new content to :file',
             'upload' => 'Began a file upload',
             'uploaded' => 'Uploaded :directory:file',
+            'restore_one' => 'Restored :files.0 from the trash',
+            'restore_other' => 'Restored :count files from the trash',
+            'trash' => [
+                'purge' => 'Deleted :count entries from the trash for good',
+            ],
         ],
         'sftp' => [
             'denied' => 'Blocked SFTP access due to permissions',
@@ -154,6 +159,10 @@ return [
             'kick' => 'Kicked :target',
             'whitelist_on' => 'Turned the whitelist on',
             'whitelist_off' => 'Turned the whitelist off',
+        ],
+        'clone' => 'Copied all files from :source to :target',
+        'sleep' => [
+            'update' => 'Changed the sleep mode settings',
         ],
         'crashed' => 'The server crashed',
         'software' => [

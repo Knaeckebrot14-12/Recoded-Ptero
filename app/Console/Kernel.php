@@ -56,6 +56,8 @@ class Kernel extends ConsoleKernel
         $schedule->command(MonitorNodesCommand::class)->everyMinute()->withoutOverlapping()->runInBackground();
         // "Move all servers away" (admin node page): checks running moves and starts the next ones.
         $schedule->command('p:nodes:drain')->everyMinute()->withoutOverlapping();
+        // File manager trash: deletes what was deleted longer ago than allowed (mcpanel.trash.hours).
+        $schedule->command('p:files:purge-trash')->hourly()->withoutOverlapping();
         $schedule->command(AutoBackupCommand::class)->everyFiveMinutes()->withoutOverlapping();
         $schedule->command(RenewCertificateCommand::class)->twiceDaily(3, 15)->withoutOverlapping();
 

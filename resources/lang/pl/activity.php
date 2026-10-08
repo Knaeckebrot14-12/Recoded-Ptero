@@ -92,6 +92,11 @@ return [
             'write' => 'Zapisano nową zawartość w :file',
             'upload' => 'Rozpoczęto przesyłanie pliku',
             'uploaded' => 'Przesłano :directory:file',
+            'restore_one' => 'Przywrócono :files.0 z kosza',
+            'restore_other' => 'Przywrócono :count plików z kosza',
+            'trash' => [
+                'purge' => 'Trwale usunięto :count pozycji z kosza',
+            ],
         ],
         'sftp' => [
             'denied' => 'Zablokowano dostęp SFTP z powodu uprawnień',
@@ -148,6 +153,10 @@ return [
             'kick' => 'Wyrzucono :target',
             'whitelist_on' => 'Włączono whitelistę',
             'whitelist_off' => 'Wyłączono whitelistę',
+        ],
+        'clone' => 'Skopiowano wszystkie pliki z :source do :target',
+        'sleep' => [
+            'update' => 'Zmieniono ustawienia trybu uśpienia',
         ],
         'crashed' => 'Serwer uległ awarii',
         'software' => [

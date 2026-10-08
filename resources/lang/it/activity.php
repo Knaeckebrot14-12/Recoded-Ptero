@@ -92,6 +92,11 @@ return [
             'write' => 'Scritto nuovo contenuto in :file',
             'upload' => 'Avviato il caricamento di un file',
             'uploaded' => 'Caricato :directory:file',
+            'restore_one' => ':files.0 ripristinato dal cestino',
+            'restore_other' => ':count file ripristinati dal cestino',
+            'trash' => [
+                'purge' => ':count elementi eliminati definitivamente dal cestino',
+            ],
         ],
         'sftp' => [
             'denied' => 'Accesso SFTP bloccato per mancanza di permessi',
@@ -148,6 +153,10 @@ return [
             'kick' => ':target espulso',
             'whitelist_on' => 'Whitelist attivata',
             'whitelist_off' => 'Whitelist disattivata',
+        ],
+        'clone' => 'Copiati tutti i file da :source a :target',
+        'sleep' => [
+            'update' => 'Impostazioni della modalità sospensione modificate',
         ],
         'crashed' => 'Il server è andato in crash',
         'software' => [

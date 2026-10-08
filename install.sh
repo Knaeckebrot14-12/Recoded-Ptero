@@ -15,7 +15,7 @@ GITHUB_REPO="${MC_PANEL_REPO:-Knaeckebrot14-12/Recoded-Ptero}"
 GITHUB_BRANCH="${MC_PANEL_BRANCH:-main}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/recoded-ptero}"
 # Wings build installed on nodes: official Pterodactyl Wings, published as release "wings-v<version>" here.
-WINGS_VERSION="${MC_WINGS_VERSION:-1.1.0}"
+WINGS_VERSION="${MC_WINGS_VERSION:-1.2.0}"
 COMPOSE_FILE="$INSTALL_DIR/docker-compose.prod.yml"
 
 if [ -t 1 ]; then

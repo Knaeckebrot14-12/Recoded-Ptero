@@ -98,6 +98,11 @@ return [
             'write' => 'Escribió nuevo contenido en :file',
             'upload' => 'Inició una subida de archivo',
             'uploaded' => 'Subió :directory:file',
+            'restore_one' => ':files.0 restaurado desde la papelera',
+            'restore_other' => ':count archivos restaurados desde la papelera',
+            'trash' => [
+                'purge' => ':count elementos eliminados definitivamente de la papelera',
+            ],
         ],
         'sftp' => [
             'denied' => 'Bloqueó el acceso SFTP por permisos',
@@ -154,6 +159,10 @@ return [
             'kick' => 'Expulsó a :target',
             'whitelist_on' => 'Activó la lista blanca',
             'whitelist_off' => 'Desactivó la lista blanca',
+        ],
+        'clone' => 'Todos los archivos de :source copiados a :target',
+        'sleep' => [
+            'update' => 'Ajustes del modo suspensión cambiados',
         ],
         'crashed' => 'El servidor se cayó',
         'software' => [

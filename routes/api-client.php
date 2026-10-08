@@ -151,6 +151,9 @@ Route::group([
         Route::middleware([ResourceLimit::FilePull->middleware()])
             ->post('/pull', [Client\Servers\FileController::class, 'pull']);
         Route::get('/upload', Client\Servers\FileUploadController::class);
+        Route::get('/trash', [Client\Servers\TrashController::class, 'index']);
+        Route::post('/trash/restore', [Client\Servers\TrashController::class, 'restore']);
+        Route::post('/trash/delete', [Client\Servers\TrashController::class, 'destroy']);
     });
 
     Route::group(['prefix' => '/schedules'], function () {
@@ -230,5 +233,8 @@ Route::group([
         Route::put('/docker-image', [Client\Servers\SettingsController::class, 'dockerImage']);
         Route::get('/sleep', [Client\Servers\SleepController::class, 'show']);
         Route::put('/sleep', [Client\Servers\SleepController::class, 'update']);
+        Route::get('/clone', [Client\Servers\CloneController::class, 'index']);
+        Route::post('/clone', [Client\Servers\CloneController::class, 'store']);
+        Route::get('/clone/status', [Client\Servers\CloneController::class, 'status']);
     });
 });

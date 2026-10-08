@@ -9,6 +9,7 @@ use Pterodactyl\Models\Server;
 use Illuminate\Http\JsonResponse;
 use Pterodactyl\Facades\Activity;
 use Pterodactyl\Services\Nodes\NodeJWTService;
+use Pterodactyl\Services\Files\TrashService;
 use Pterodactyl\Repositories\Wings\DaemonFileRepository;
 use Pterodactyl\Transformers\Api\Client\FileObjectTransformer;
 use Pterodactyl\Http\Controllers\Api\Client\ClientApiController;
@@ -46,6 +47,11 @@ class FileController extends ClientApiController
         $contents = $this->fileRepository
             ->setServer($server)
             ->getDirectory($request->get('directory') ?? '/');
+
+        // The trash folder is shown in its own window, not between the server's files.
+        if (TrashService::normalize($request->get('directory')) === '') {
+            $contents = array_values(array_filter($contents, fn ($item) => ($item['name'] ?? '') !== TrashService::DIRECTORY));
+        }
 
         return $this->fractal->collection($contents)
             ->transformWith($this->getTransformer(FileObjectTransformer::class))
@@ -214,16 +220,20 @@ class FileController extends ClientApiController
      *
      * @throws \Pterodactyl\Exceptions\Http\Connection\DaemonConnectionException
      */
-    public function delete(DeleteFileRequest $request, Server $server): JsonResponse
+    public function delete(DeleteFileRequest $request, Server $server, TrashService $trash): JsonResponse
     {
-        $this->fileRepository->setServer($server)->deleteFiles(
-            $request->input('root'),
-            $request->input('files')
-        );
+        // Recoded Ptero: files go into the trash (restorable for a while) unless asked otherwise.
+        $permanent = $request->boolean('permanent');
+        if ($permanent) {
+            $trash->deletePermanently($server, TrashService::normalize($request->input('root')), $request->input('files'));
+        } else {
+            $trash->trash($server, $request->input('root'), $request->input('files'), $request->user());
+        }
 
         Activity::event('server:file.delete')
             ->property('directory', $request->input('root'))
             ->property('files', $request->input('files'))
+            ->property('trash', !$permanent)
             ->log();
 
         return new JsonResponse([], Response::HTTP_NO_CONTENT);
