@@ -52,6 +52,7 @@ return [
     'deployment' => [
         'no_viable_nodes' => 'Es konnten keine Nodes gefunden werden, die die Anforderungen für die automatische Bereitstellung erfüllen.',
         'no_viable_allocations' => 'Es konnten keine Allokationen gefunden werden, die die Anforderungen für die automatische Bereitstellung erfüllen.',
+        'no_placement' => 'Derzeit kann kein Node diesen Server aufnehmen (genug freier Arbeitsspeicher und Speicherplatz, ein freier Port, online und nicht in Wartung). Es wurde nichts erstellt.',
     ],
     'api' => [
         'resource_not_found' => 'Die angeforderte Ressource existiert auf diesem Server nicht.',

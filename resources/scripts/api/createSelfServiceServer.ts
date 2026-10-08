@@ -3,7 +3,7 @@ import http from '@/api/http';
 export interface CreateSelfServiceServerData {
     name: string;
     eggId: number;
-    nodeId: number;
+    nodeId: number | null;
     memory: number;
     disk: number;
     cpu: number;

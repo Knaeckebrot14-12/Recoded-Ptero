@@ -95,6 +95,7 @@
                     </div>
                 </div>
             @endif
+            @include('admin.nodes.partials.drain')
             <div class="col-xs-12">
                 <div class="box box-danger">
                     <div class="box-header with-border">

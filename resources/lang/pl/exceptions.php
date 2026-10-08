@@ -52,6 +52,7 @@ return [
     'deployment' => [
         'no_viable_nodes' => 'Nie znaleziono węzła spełniającego wymagania określone dla automatycznego wdrożenia.',
         'no_viable_allocations' => 'Nie znaleziono alokacji spełniających wymagania automatycznego wdrożenia.',
+        'no_placement' => 'Żaden węzeł nie może teraz przyjąć tego serwera (wystarczająco wolnej pamięci i dysku, wolny port, online i bez trybu konserwacji). Nic nie zostało utworzone.',
     ],
     'api' => [
         'resource_not_found' => 'Żądany zasób nie istnieje na tym serwerze.',

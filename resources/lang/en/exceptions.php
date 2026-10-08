@@ -52,6 +52,7 @@ return [
     'deployment' => [
         'no_viable_nodes' => 'No nodes satisfying the requirements specified for automatic deployment could be found.',
         'no_viable_allocations' => 'No allocations satisfying the requirements for automatic deployment were found.',
+        'no_placement' => 'No node can take this server right now (enough free memory and disk, a free port, online and not in maintenance). Nothing was created.',
     ],
     'api' => [
         'resource_not_found' => 'The requested resource does not exist on this server.',

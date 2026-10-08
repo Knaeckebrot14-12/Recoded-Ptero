@@ -58,6 +58,8 @@ return [
         'maintenance.updated' => 'Mode maintenance réglé sur :subject',
         'user.email_verified' => 'Adresse e-mail de :subject confirmée',
         'nodes.wings_update' => 'A mis à jour Wings sur le node :subject vers :version',
+        'nodes.drain_started' => 'A lancé le déplacement des :count serveur(s) du node :subject (mode maintenance activé)',
+        'nodes.drain_cancelled' => 'A annulé le déplacement des serveurs du node :subject',
         'settings.monitoring' => 'A modifié les paramètres de surveillance',
         'settings.abuse' => 'A modifié les paramètres de détection d\'abus',
         'abuse.resolved' => 'A résolu le signalement d\'abus (:type) du serveur :subject',

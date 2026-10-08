@@ -224,6 +224,10 @@ Route::group(['prefix' => 'nodes', 'middleware' => ['staff:nodes']], function ()
     Route::get('/monitoring', [Admin\Nodes\NodeMonitorController::class, 'overview'])->name('admin.nodes.monitoring');
     Route::post('/view/{node:id}/wings-update', [Admin\Nodes\NodeMonitorController::class, 'updateWings'])->name('admin.nodes.view.wings-update');
     Route::post('/wings-update', [Admin\Nodes\NodeMonitorController::class, 'updateAllWings'])->name('admin.nodes.wings-update');
+    // "Move all servers away": moving servers also needs the permission to manage servers.
+    Route::get('/view/{node:id}/drain', [Admin\Nodes\NodeDrainController::class, 'status'])->name('admin.nodes.view.drain');
+    Route::post('/view/{node:id}/drain', [Admin\Nodes\NodeDrainController::class, 'start'])->name('admin.nodes.view.drain.start')->middleware('staff:servers.manage');
+    Route::post('/view/{node:id}/drain/cancel', [Admin\Nodes\NodeDrainController::class, 'cancel'])->name('admin.nodes.view.drain.cancel')->middleware('staff:servers.manage');
 
     Route::post('/new', [Admin\NodesController::class, 'store']);
     Route::post('/view/{node:id}/allocation', [Admin\NodesController::class, 'createAllocation']);

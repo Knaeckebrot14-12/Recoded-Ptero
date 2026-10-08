@@ -52,6 +52,7 @@ return [
     'deployment' => [
         'no_viable_nodes' => 'No se encontraron nodos que cumplan los requisitos especificados para el despliegue automático.',
         'no_viable_allocations' => 'No se encontraron asignaciones que cumplan los requisitos del despliegue automático.',
+        'no_placement' => 'Ningún nodo puede alojar este servidor ahora mismo (suficiente memoria y disco libres, un puerto libre, en línea y sin mantenimiento). No se ha creado nada.',
     ],
     'api' => [
         'resource_not_found' => 'El recurso solicitado no existe en este servidor.',

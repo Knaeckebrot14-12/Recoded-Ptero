@@ -52,6 +52,7 @@ return [
     'deployment' => [
         'no_viable_nodes' => 'Er is geen node gevonden die voldoet aan de opgegeven eisen voor automatische implementatie.',
         'no_viable_allocations' => 'Er is geen allocatie gevonden die voldoet aan de eisen voor automatische implementatie.',
+        'no_placement' => 'Er is op dit moment geen node die deze server kan opnemen (genoeg vrij geheugen en schijfruimte, een vrije poort, online en niet in onderhoud). Er is niets aangemaakt.',
     ],
     'api' => [
         'resource_not_found' => 'De opgevraagde resource bestaat niet op deze server.',

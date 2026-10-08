@@ -66,6 +66,33 @@
 
                 <div class="box-body row">
                     <div class="form-group col-sm-4">
+                        <label for="pAutoDeploy">@lang('admin/placement.create.mode_label')</label>
+                        <select name="auto_deploy" id="pAutoDeploy" class="form-control">
+                            <option value="0">@lang('admin/placement.create.mode_manual')</option>
+                            <option value="1" @if(old('auto_deploy')) selected @endif>@lang('admin/placement.create.mode_auto')</option>
+                        </select>
+                        <p class="small text-muted no-margin">@lang('admin/placement.create.mode_description')</p>
+                    </div>
+
+                    <div class="form-group col-sm-4 auto-deploy-field">
+                        <label for="pDeployLocation">@lang('admin/placement.create.location_label')</label>
+                        <select name="deploy[locations][]" id="pDeployLocation" class="form-control">
+                            <option value="">@lang('admin/placement.create.location_any')</option>
+                            @foreach($locations as $location)
+                                <option value="{{ $location->id }}" @if((string) $location->id === (string) old('deploy.locations.0')) selected @endif>{{ $location->long }} ({{ $location->short }})</option>
+                            @endforeach
+                        </select>
+                    </div>
+
+                    <div class="form-group col-sm-4 auto-deploy-field">
+                        <label for="pDeployPorts">@lang('admin/placement.create.port_range_label')</label>
+                        <input type="text" id="pDeployPorts" name="deploy[port_range]" class="form-control" value="{{ old('deploy.port_range') }}" placeholder="25565-25600" />
+                        <p class="small text-muted no-margin">@lang('admin/placement.create.port_range_description')</p>
+                    </div>
+                </div>
+
+                <div class="box-body row manual-deploy-field">
+                    <div class="form-group col-sm-4">
                         <label for="pNodeId">@lang('admin/servers_new.node_label')</label>
                         <select name="node_id" id="pNodeId" class="form-control">
                             @foreach($locations as $location)
@@ -354,6 +381,15 @@
     </script>
 
     {!! Theme::js('js/admin/new-server.js?v=20220530') !!}
+
+    <script type="application/javascript">
+        // "Automatic (best node)": the panel picks node and allocation, so those fields are not sent.
+        $('#pAutoDeploy').on('change', function () {
+            var auto = $(this).val() === '1';
+            $('.auto-deploy-field').toggle(auto).find('select, input').prop('disabled', !auto);
+            $('.manual-deploy-field').toggle(!auto).find('select').prop('disabled', auto);
+        }).change();
+    </script>
 
     <script type="application/javascript">
         $(document).ready(function() {

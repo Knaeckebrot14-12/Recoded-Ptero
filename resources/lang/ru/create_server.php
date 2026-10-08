@@ -40,6 +40,7 @@ return [
         'name_placeholder' => 'Мой сервер',
         'egg_label' => 'Egg',
         'node_label' => 'Node',
+        'node_auto' => 'Автоматически (лучшая нода)',
         'node_servers_one' => ':count сервер',
         'node_servers_other' => ':count серверов',
         'memory_label' => 'Память (МиБ)',
