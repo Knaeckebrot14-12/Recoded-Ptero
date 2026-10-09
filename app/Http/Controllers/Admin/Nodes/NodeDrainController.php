@@ -32,20 +32,22 @@ class NodeDrainController extends Controller
             $drain->refresh();
         }
 
+        $returnable = NodeDrainService::returnable($node)->count();
         if (is_null($drain)) {
-            return new JsonResponse(['drain' => null]);
+            return new JsonResponse(['drain' => null, 'returnable' => $returnable]);
         }
 
         $rows = $drain->servers()->with(['server:id,name', 'targetNode:id,name'])->orderBy('id')->get();
 
-        return new JsonResponse(['drain' => [
+        return new JsonResponse(['returnable' => $returnable, 'drain' => [
             'status' => $drain->status,
-            'status_label' => trans('admin/placement.drain.state_' . $drain->status),
+            'mode' => $drain->mode,
+            'status_label' => trans('admin/placement.drain.state_' . $drain->status) . ($drain->isReturn() ? ' · ' . trans('admin/placement.drain.mode_back') : ''),
             'started' => trans('admin/placement.drain.started_by', [
                 'time' => $drain->created_at->diffForHumans(),
                 'user' => $drain->user?->username ?? '–',
             ]),
-            'summary' => trans('admin/placement.drain.summary', [
+            'summary' => trans($drain->isReturn() ? 'admin/placement.drain.summary_back' : 'admin/placement.drain.summary', [
                 'done' => $rows->where('status', NodeDrainServer::STATUS_DONE)->count(),
                 'total' => $rows->count(),
             ]),
@@ -74,6 +76,21 @@ class NodeDrainController extends Controller
         StaffAudit::record('nodes.drain_started', $node->name, ['count' => $drain->servers()->count()]);
 
         $this->alert->success(trans('admin/placement.drain.started', ['node' => $node->name]))->flash();
+
+        return redirect()->route('admin.nodes.view', $node->id);
+    }
+
+    /**
+     * "Move them back": the servers the latest run moved away return to this node.
+     *
+     * @throws \Throwable
+     */
+    public function back(Request $request, Node $node): RedirectResponse
+    {
+        $drain = $this->drains->startReturn($node, $request->user());
+        StaffAudit::record('nodes.drain_returned', $node->name, ['count' => $drain->servers()->count()]);
+
+        $this->alert->success(trans('admin/placement.drain.returning', ['node' => $node->name]))->flash();
 
         return redirect()->route('admin.nodes.view', $node->id);
     }

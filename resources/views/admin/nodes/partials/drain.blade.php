@@ -9,6 +9,7 @@
             <p class="no-margin">@lang('admin/placement.drain.description')</p>
             <p class="text-muted small" id="drain-meta" style="display:none; margin:10px 0 0;"></p>
             <p class="text-green small" id="drain-finished" style="display:none; margin:10px 0 0;">@lang('admin/placement.drain.finished_notice')</p>
+            <p class="text-green small" id="drain-finished-back" style="display:none; margin:10px 0 0;">@lang('admin/placement.drain.finished_notice_back')</p>
         </div>
         <div class="box-body table-responsive no-padding" id="drain-table" style="display:none;">
             <table class="table table-hover">
@@ -29,6 +30,11 @@
                     {!! csrf_field() !!}
                     <button type="submit" class="btn btn-warning btn-sm pull-right" {{ ($node->servers_count < 1) ? 'disabled' : '' }}><i class="fa fa-truck"></i> @lang('admin/placement.drain.start_button')</button>
                 </form>
+                <form id="drain-back" action="{{ route('admin.nodes.view.drain.back', $node->id) }}" method="POST" style="display:none;">
+                    {!! csrf_field() !!}
+                    <span class="small text-muted">@lang('admin/placement.drain.return_description')</span>
+                    <button type="submit" class="btn btn-success btn-sm pull-right" style="margin-left:8px;"><i class="fa fa-undo"></i> <span id="drain-back-label"></span></button>
+                </form>
                 <form id="drain-cancel" action="{{ route('admin.nodes.view.drain.cancel', $node->id) }}" method="POST" style="display:none;">
                     {!! csrf_field() !!}
                     <span class="small text-muted">@lang('admin/placement.drain.cancel_description')</span>
@@ -42,6 +48,8 @@
 (function () {
     var url = @json(route('admin.nodes.view.drain', $node->id));
     var confirmText = @json(trans('admin/placement.drain.start_confirm', ['node' => $node->name]));
+    var backConfirm = @json(trans('admin/placement.drain.return_confirm', ['node' => $node->name]));
+    var backLabel = @json(trans('admin/placement.drain.return_button'));
     var colors = { queued: 'default', moving: 'primary', done: 'success', failed: 'danger', no_target: 'warning', cancelled: 'default', running: 'primary', finished: 'success' };
     var timer = null;
 
@@ -54,14 +62,19 @@
         return span;
     }
 
-    function render(drain) {
+    function render(drain, returnable) {
         var running = !!drain && drain.status === 'running';
         show('drain-start', !running);
         show('drain-cancel', running);
+        show('drain-back', !running && returnable > 0);
+        if (el('drain-back-label')) {
+            el('drain-back-label').textContent = backLabel.replace(':count', returnable);
+        }
         show('drain-state', !!drain);
         show('drain-meta', !!drain);
         show('drain-table', !!drain && drain.servers.length > 0);
-        show('drain-finished', !!drain && drain.status === 'finished');
+        show('drain-finished', !!drain && drain.status === 'finished' && drain.mode !== 'back' && !(returnable > 0));
+        show('drain-finished-back', !!drain && drain.status === 'finished' && drain.mode === 'back');
         if (!drain) {
             return;
         }
@@ -94,7 +107,7 @@
         fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
             .then(function (response) { return response.json(); })
             .then(function (data) {
-                render(data.drain);
+                render(data.drain, data.returnable || 0);
                 clearTimeout(timer);
                 if (data.drain && data.drain.status === 'running') {
                     timer = setTimeout(load, 5000);
@@ -106,6 +119,13 @@
     if (el('drain-start')) {
         el('drain-start').addEventListener('submit', function (event) {
             if (!window.confirm(confirmText)) {
+                event.preventDefault();
+            }
+        });
+    }
+    if (el('drain-back')) {
+        el('drain-back').addEventListener('submit', function (event) {
+            if (!window.confirm(backConfirm)) {
                 event.preventDefault();
             }
         });

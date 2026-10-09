@@ -60,6 +60,7 @@ return [
         'nodes.wings_update' => 'Wings auf Node :subject auf :version aktualisiert',
         'nodes.drain_started' => 'Wegverschieben aller :count Server von Node :subject gestartet (Wartungsmodus an)',
         'nodes.drain_cancelled' => 'Wegverschieben der Server von Node :subject abgebrochen',
+        'nodes.drain_returned' => ':count Server zurück auf Node :subject verschoben',
         'settings.monitoring' => 'Monitoring-Einstellungen geändert',
         'settings.abuse' => 'Einstellungen der Missbrauchserkennung geändert',
         'abuse.resolved' => 'Missbrauchs-Hinweis (:type) von Server :subject erledigt',

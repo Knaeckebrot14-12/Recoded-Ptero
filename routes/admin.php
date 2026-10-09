@@ -228,6 +228,7 @@ Route::group(['prefix' => 'nodes', 'middleware' => ['staff:nodes']], function ()
     Route::get('/view/{node:id}/drain', [Admin\Nodes\NodeDrainController::class, 'status'])->name('admin.nodes.view.drain');
     Route::post('/view/{node:id}/drain', [Admin\Nodes\NodeDrainController::class, 'start'])->name('admin.nodes.view.drain.start')->middleware('staff:servers.manage');
     Route::post('/view/{node:id}/drain/cancel', [Admin\Nodes\NodeDrainController::class, 'cancel'])->name('admin.nodes.view.drain.cancel')->middleware('staff:servers.manage');
+    Route::post('/view/{node:id}/drain/back', [Admin\Nodes\NodeDrainController::class, 'back'])->name('admin.nodes.view.drain.back')->middleware('staff:servers.manage');
 
     Route::post('/new', [Admin\NodesController::class, 'store']);
     Route::post('/view/{node:id}/allocation', [Admin\NodesController::class, 'createAllocation']);

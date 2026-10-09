@@ -12,6 +12,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int $node_id
  * @property int|null $user_id
  * @property string $status running|finished|cancelled
+ * @property string $mode away (move the servers off the node) or back (return the servers an "away" drain moved)
+ * @property int|null $source_drain_id the "away" drain a "back" drain returns the servers of
  * @property bool $maintenance_before the node's maintenance mode before the drain started
  * @property \Carbon\Carbon $created_at
  * @property \Carbon\Carbon $updated_at
@@ -28,6 +30,9 @@ class NodeDrain extends Model
     public const STATUS_FINISHED = 'finished';
     public const STATUS_CANCELLED = 'cancelled';
 
+    public const MODE_AWAY = 'away';
+    public const MODE_BACK = 'back';
+
     protected $table = 'node_drains';
 
     protected $guarded = ['id', 'created_at', 'updated_at'];
@@ -36,6 +41,7 @@ class NodeDrain extends Model
         'node_id' => 'integer',
         'user_id' => 'integer',
         'maintenance_before' => 'boolean',
+        'source_drain_id' => 'integer',
         'finished_at' => 'datetime',
     ];
 
@@ -44,11 +50,18 @@ class NodeDrain extends Model
         'user_id' => 'nullable|integer',
         'status' => 'required|in:running,finished,cancelled',
         'maintenance_before' => 'boolean',
+        'mode' => 'in:away,back',
+        'source_drain_id' => 'nullable|integer',
     ];
 
     public function isRunning(): bool
     {
         return $this->status === self::STATUS_RUNNING;
+    }
+
+    public function isReturn(): bool
+    {
+        return $this->mode === self::MODE_BACK;
     }
 
     public function node(): BelongsTo
